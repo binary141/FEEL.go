@@ -110,6 +110,17 @@ func compareInterfaces(leftVal, rightVal any) (int, error) {
 				return 1, nil
 			}
 		}
+	case *FEELDuration:
+		if rightDur, ok := rightVal.(*FEELDuration); ok {
+			left, right := v.Duration(), rightDur.Duration()
+			if left == right {
+				return 0, nil
+			} else if left < right {
+				return -1, nil
+			} else {
+				return 1, nil
+			}
+		}
 	case []any:
 		if rightArr, ok := rightVal.([]any); ok {
 			return compareArrays(v, rightArr)
