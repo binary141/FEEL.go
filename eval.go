@@ -201,6 +201,39 @@ func (node Var) Eval(intp *Interpreter) (any, error) {
 	}
 }
 
+func (node BetweenExpr) Eval(intp *Interpreter) (any, error) {
+	val, err := node.Value.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	lower, err := node.Lower.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	upper, err := node.Upper.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	if _, isNull := val.(*NullValue); isNull {
+		return Null, nil
+	}
+	if _, isNull := lower.(*NullValue); isNull {
+		return Null, nil
+	}
+	if _, isNull := upper.(*NullValue); isNull {
+		return Null, nil
+	}
+	lowerCmp, err := compareInterfaces(lower, val)
+	if err != nil {
+		return Null, nil
+	}
+	upperCmp, err := compareInterfaces(val, upper)
+	if err != nil {
+		return Null, nil
+	}
+	return lowerCmp <= 0 && upperCmp <= 0, nil
+}
+
 func (node RangeNode) Eval(intp *Interpreter) (any, error) {
 	startVal, err := node.Start.Eval(intp)
 	if err != nil {

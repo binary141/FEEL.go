@@ -322,6 +322,21 @@ func (node MultiTests) Repr() string {
 	return fmt.Sprintf("(multitests %s)", strings.Join(s, " "))
 }
 
+// between expression: value between lower and upper
+type BetweenExpr struct {
+	Value     Node
+	Lower     Node
+	Upper     Node
+	textRange TextRange
+}
+
+func (node BetweenExpr) TextRange() TextRange {
+	return node.textRange
+}
+func (node BetweenExpr) Repr() string {
+	return fmt.Sprintf("(between %s %s %s)", node.Value.Repr(), node.Lower.Repr(), node.Upper.Repr())
+}
+
 // For expression
 type ForExpr struct {
 	Varname    string

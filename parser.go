@@ -194,8 +194,34 @@ func (p *Parser) binopKeywords(ops []string, subfunc astFunc) (Node, error) {
 func (p *Parser) inOp() (Node, error) {
 	return p.binopKeywords(
 		[]string{"in"},
-		p.logicOrOp,
+		p.betweenOp,
 	)
+}
+
+func (p *Parser) betweenOp() (Node, error) {
+	textRange := p.startTextRange()
+	left, err := p.logicOrOp()
+	if err != nil {
+		return nil, err
+	}
+	if !(p.CurrentToken().Kind == TokenName && p.CurrentToken().Value == "between") {
+		return left, nil
+	}
+	p.scanner.Next()
+	lower, err := p.compareOp()
+	if err != nil {
+		return nil, err
+	}
+	if !p.CurrentToken().ExpectKeywords("and") {
+		return nil, p.Unexpected("and")
+	}
+	p.scanner.Next()
+	upper, err := p.compareOp()
+	if err != nil {
+		return nil, err
+	}
+	textRange.End = p.CurrentToken().Pos
+	return &BetweenExpr{Value: left, Lower: lower, Upper: upper, textRange: textRange}, nil
 }
 
 func (p *Parser) logicOrOp() (Node, error) {
