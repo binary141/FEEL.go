@@ -314,13 +314,16 @@ func (dur FEELDuration) String() string {
 	}
 	if sYear != "" || sMonth != "" {
 		return fmt.Sprintf("%sP%s%s", sNeg, sYear, sMonth)
-	} else {
+	} else if sHour != "" || sMinute != "" || sSecond != "" {
 		return fmt.Sprintf("%sP%sT%s%s%s", sNeg, sDay, sHour, sMinute, sSecond)
+	} else {
+		return fmt.Sprintf("%sP%s", sNeg, sDay)
 	}
 }
 
 var yearmonthDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)Y)?((\d+)M)?$`)
-var timeDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)D)?T((\d+)H)?((\d+)M)?((\d+)S)?$`)
+// T(ime) separator is optional when no time components (H/M/S) are present (e.g. "P1D" is valid)
+var timeDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)D)?(T((\d+)H)?((\d+)M)?((\d+)S)?)?$`)
 
 func ParseDuration(temporalStr string) (*FEELDuration, error) {
 	// parse year month duration
@@ -351,6 +354,7 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 	}
 
 	// parse day time duration
+	// groups: [1]=neg [2]=dayspart [3]=daysval [4]=timepart [5]=hourspart [6]=hoursval [7]=minspart [8]=minsval [9]=secspart [10]=secsval
 	if submatches := timeDurationPattern.FindStringSubmatch(temporalStr); submatches != nil {
 		dur := &FEELDuration{}
 		if submatches[1] != "" {
@@ -363,8 +367,8 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 			}
 			dur.Days = int(v)
 		}
-		if submatches[4] != "" {
-			v, err := strconv.ParseInt(submatches[5], 10, 64)
+		if submatches[5] != "" {
+			v, err := strconv.ParseInt(submatches[6], 10, 64)
 			if err != nil {
 				return nil, err
 			}
@@ -373,8 +377,8 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 			}
 			dur.Hours = int(v)
 		}
-		if submatches[6] != "" {
-			v, err := strconv.ParseInt(submatches[7], 10, 64)
+		if submatches[7] != "" {
+			v, err := strconv.ParseInt(submatches[8], 10, 64)
 			if err != nil {
 				return nil, err
 			}
@@ -383,8 +387,8 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 			}
 			dur.Minutes = int(v)
 		}
-		if submatches[8] != "" {
-			v, err := strconv.ParseInt(submatches[9], 10, 64)
+		if submatches[9] != "" {
+			v, err := strconv.ParseInt(submatches[10], 10, 64)
 			if err != nil {
 				return nil, err
 			}
