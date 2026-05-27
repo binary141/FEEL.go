@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/go-cmp/cmp"
 )
 
 func (binop Binop) Eval(intp *Interpreter) (any, error) {
@@ -422,7 +421,8 @@ func (binop Binop) inOp(intp *Interpreter) (any, error) {
 		return rv.Contains(leftVal), nil
 	case []any:
 		for _, kv := range rv {
-			if cmp.Equal(leftVal, kv) {
+			r, err := compareInterfaces(leftVal, kv)
+			if err == nil && r == 0 {
 				return true, nil
 			}
 		}
