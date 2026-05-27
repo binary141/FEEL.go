@@ -77,6 +77,7 @@ var tokenMatchers = []tokenMatcher{
 
 	match("+", ""),
 	match("-", ""),
+	match("**", ""),
 	match("*", ""),
 	match("/", ""),
 	match("%", ""),
@@ -98,11 +99,12 @@ type ScannerToken struct {
 }
 
 var opTokens = map[string]bool{
-	"+": true,
-	"-": true,
-	"*": true,
-	"/": true,
-	"%": true,
+	"+":  true,
+	"-":  true,
+	"**": true,
+	"*":  true,
+	"/":  true,
+	"%":  true,
 }
 
 func (token ScannerToken) IsOp() bool {

@@ -20,6 +20,8 @@ func (binop Binop) Eval(intp *Interpreter) (any, error) {
 		return binop.subOp(intp)
 	case "*":
 		return binop.mulOp(intp)
+	case "**":
+		return binop.powOp(intp)
 	case "/":
 		return binop.divOp(intp)
 	case "%":
@@ -241,10 +243,17 @@ func (binop Binop) mulOp(intp *Interpreter) (any, error) {
 		"*")
 }
 
+func (binop Binop) powOp(intp *Interpreter) (any, error) {
+	return binop.numberOp(
+		intp,
+		func(a, b *Number) any { return a.Pow(b) },
+		"**")
+}
+
 func (binop Binop) divOp(intp *Interpreter) (any, error) {
 	return binop.numberOp(
 		intp,
-		func(a, b *Number) any { return a.IntDiv(b) },
+		func(a, b *Number) any { return a.FloatDiv(b) },
 		"/")
 }
 

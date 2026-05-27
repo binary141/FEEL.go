@@ -229,8 +229,30 @@ func (p *Parser) addOrSubOp() (Node, error) {
 func (p *Parser) mulOrDivOp() (Node, error) {
 	return p.binop(
 		[]string{"*", "/", "%"},
-		p.parseFuncallOrIndexOrDot,
+		p.powOp,
 	)
+}
+
+func (p *Parser) powOp() (Node, error) {
+	return p.binop(
+		[]string{"**"},
+		p.unaryMinusOp,
+	)
+}
+
+func (p *Parser) unaryMinusOp() (Node, error) {
+	if p.CurrentToken().Expect("-") {
+		textRange := p.startTextRange()
+		p.scanner.Next()
+		right, err := p.unaryMinusOp()
+		if err != nil {
+			return nil, err
+		}
+		textRange.End = p.CurrentToken().Pos
+		zero := &NumberNode{Value: "0", textRange: textRange}
+		return &Binop{Op: "-", Left: zero, Right: right, textRange: textRange}, nil
+	}
+	return p.parseFuncallOrIndexOrDot()
 }
 
 func (p *Parser) parseFuncallOrIndexOrDot() (Node, error) {

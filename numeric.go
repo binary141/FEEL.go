@@ -4,6 +4,7 @@ package feel
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"math/big"
 )
 
@@ -113,6 +114,14 @@ func (number *Number) FloatDiv(other *Number) *Number {
 	b, _ := other.v.Float64()
 	newf := new(big.Float)
 	newf.SetPrec(Prec).SetFloat64(a / b)
+	return &Number{v: newf}
+}
+
+func (number *Number) Pow(exp *Number) *Number {
+	a, _ := number.v.Float64()
+	b, _ := exp.v.Float64()
+	newf := new(big.Float)
+	newf.SetPrec(Prec).SetFloat64(math.Pow(a, b))
 	return &Number{v: newf}
 }
 
