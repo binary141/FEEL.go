@@ -81,6 +81,10 @@ func (date FEELDate) Date() time.Time {
 	return date.t
 }
 
+func (date FEELDate) Time() time.Time {
+	return date.t
+}
+
 func (date FEELDate) GetAttr(name string) (interface{}, bool) {
 	switch name {
 	case "year":
