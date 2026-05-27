@@ -1,4 +1,4 @@
-module github.com/superisaac/FEEL.go
+module github.com/binary141/FEEL.go
 
 go 1.19
 
