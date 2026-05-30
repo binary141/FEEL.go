@@ -125,6 +125,10 @@ func (number *Number) Pow(exp *Number) *Number {
 	return &Number{v: newf}
 }
 
+func (number *Number) IsZero() bool {
+	return number.v.Sign() == 0
+}
+
 func (number *Number) IntMod(other *Number) *Number {
 	newv := new(big.Int)
 	a, _ := number.v.Int(nil)

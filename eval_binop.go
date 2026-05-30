@@ -282,7 +282,12 @@ func (binop Binop) powOp(intp *Interpreter) (any, error) {
 func (binop Binop) divOp(intp *Interpreter) (any, error) {
 	return binop.numberOp(
 		intp,
-		func(a, b *Number) any { return a.FloatDiv(b) },
+		func(a, b *Number) any {
+			if b.IsZero() {
+				return Null
+			}
+			return a.FloatDiv(b)
+		},
 		"/")
 }
 
@@ -352,7 +357,12 @@ func (binop Binop) notEqalOp(intp *Interpreter) (any, error) {
 func (binop Binop) modOp(intp *Interpreter) (any, error) {
 	return binop.numberOp(
 		intp,
-		func(a, b *Number) any { return a.IntMod(b) },
+		func(a, b *Number) any {
+			if b.IsZero() {
+				return Null
+			}
+			return a.IntMod(b)
+		},
 		"%")
 }
 
