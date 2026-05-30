@@ -108,12 +108,12 @@ func (rv RangeValue) Includes(other RangeValue) (bool, error) {
 	return true, nil
 }
 
-func (rv RangeValue) Contains(p any) bool {
+func (rv RangeValue) Contains(p any) (bool, error) {
 	r, err := rv.Position(p)
 	if err != nil {
-		panic(err)
+		return false, err
 	}
-	return r == 0
+	return r == 0, nil
 }
 
 func (rv RangeValue) overlapsBefore(other RangeValue) (bool, error) {

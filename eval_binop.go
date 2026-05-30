@@ -111,7 +111,14 @@ func compareInterfaces(leftVal, rightVal any) (int, error) {
 		}
 	case *FEELDuration:
 		if rightDur, ok := rightVal.(*FEELDuration); ok {
-			left, right := v.Duration(), rightDur.Duration()
+			var left, right int64
+			if v.IsYearMonth() && rightDur.IsYearMonth() {
+				left = v.TotalMonths()
+				right = rightDur.TotalMonths()
+			} else {
+				left = int64(v.Duration())
+				right = int64(rightDur.Duration())
+			}
 			if left == right {
 				return 0, nil
 			} else if left < right {
@@ -148,7 +155,9 @@ func compareArrays(a, b []any) (int, error) {
 			return r, nil
 		}
 	}
-	if len(b) > minSize {
+	if len(a) == len(b) {
+		return 0, nil
+	} else if len(b) > len(a) {
 		return -1, nil
 	} else {
 		return 1, nil
@@ -306,6 +315,10 @@ func (binop Binop) compareLEOp(intp *Interpreter) (any, error) {
 func (binop Binop) equalOp(intp *Interpreter) (any, error) {
 	r, err := binop.compareValues(intp)
 	if err != nil {
+		var evalError *EvalError
+		if errors.As(err, &evalError) && evalError.Code == -3106 {
+			return false, nil
+		}
 		return false, err
 	} else {
 		return r == 0, nil
@@ -412,22 +425,42 @@ func (binop Binop) inOp(intp *Interpreter) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Bind ? = leftVal so unary tests (<val, <=val, …) resolve correctly.
+	intp.Push(Scope{"?": leftVal})
+	defer intp.Pop()
+
 	rightVal, err := binop.Right.Eval(intp)
 	if err != nil {
 		return nil, err
 	}
 	switch rv := rightVal.(type) {
 	case *RangeValue:
-		return rv.Contains(leftVal), nil
+		ok, err := rv.Contains(leftVal)
+		if err != nil {
+			return Null, nil
+		}
+		return ok, nil
 	case []any:
 		for _, kv := range rv {
-			r, err := compareInterfaces(leftVal, kv)
-			if err == nil && r == 0 {
+			if rangeVal, ok := kv.(*RangeValue); ok {
+				if inside, err := rangeVal.Contains(leftVal); err == nil && inside {
+					return true, nil
+				}
+			} else if r, err := compareInterfaces(leftVal, kv); err == nil && r == 0 {
 				return true, nil
 			}
 		}
 		return false, nil
+	case bool:
+		// Result of a unary test expression (e.g. ? < 5 evaluated to a bool).
+		return rv, nil
 	default:
-		return nil, NewErrBadOp(typeName(leftVal), "in", typeName(rightVal))
+		// Scalar: equality check (e.g. 1 in 1 → true).
+		r, err := compareInterfaces(leftVal, rightVal)
+		if err != nil {
+			return Null, nil
+		}
+		return r == 0, nil
 	}
 }

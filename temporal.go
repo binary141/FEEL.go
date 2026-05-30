@@ -285,6 +285,18 @@ func (dur FEELDuration) Duration() time.Duration {
 	return dv
 }
 
+func (dur FEELDuration) IsYearMonth() bool {
+	return dur.Years != 0 || dur.Months != 0
+}
+
+func (dur FEELDuration) TotalMonths() int64 {
+	total := int64(dur.Years)*12 + int64(dur.Months)
+	if dur.Neg {
+		return -total
+	}
+	return total
+}
+
 func (dur *FEELDuration) Negative() *FEELDuration {
 	neg := *dur
 	neg.Neg = !dur.Neg

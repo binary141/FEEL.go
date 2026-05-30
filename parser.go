@@ -99,7 +99,8 @@ func (p *Parser) parseUnaryTest() (Node, error) {
 		textRange := p.startTextRange()
 		op := p.CurrentToken().Kind
 		p.scanner.Next()
-		right, err := p.simpleValue()
+		// Use expression() so the RHS can be a function call, boolean, etc.
+		right, err := p.betweenOp()
 		if err != nil {
 			return nil, err
 		}
@@ -190,12 +191,101 @@ func (p *Parser) binopKeywords(ops []string, subfunc astFunc) (Node, error) {
 	return left, nil
 }
 
-// pase chains
+// inOp parses "expr in <test>" where test can be a unary comparison,
+// a parenthesised list of tests, or any expression (range, list, value).
 func (p *Parser) inOp() (Node, error) {
-	return p.binopKeywords(
-		[]string{"in"},
-		p.betweenOp,
-	)
+	left, err := p.betweenOp()
+	if err != nil {
+		return nil, err
+	}
+	if !p.CurrentToken().ExpectKeywords("in") {
+		return left, nil
+	}
+	p.scanner.Next()
+	right, err := p.parseInRHS()
+	if err != nil {
+		return nil, err
+	}
+	textRange := TextRange{Start: left.TextRange().Start, End: p.CurrentToken().Pos}
+	return &Binop{Op: "in", Left: left, Right: right, textRange: textRange}, nil
+}
+
+// parseInRHS parses the right-hand side of an `in` expression.
+func (p *Parser) parseInRHS() (Node, error) {
+	// Single unary comparison: < val, <= val, > val, >= val, = val, != val
+	if p.CurrentToken().Expect(">", ">=", "<", "<=", "!=", "=") {
+		return p.parseUnaryTest()
+	}
+	// Parenthesised: open-start range (a..b) or list of tests (a, <b, >=c)
+	if p.CurrentToken().Expect("(") {
+		return p.parseInParenRHS()
+	}
+	// Default: range, list literal, value expression
+	return p.expression()
+}
+
+// parseInParenRHS handles the parenthesised form on the right of `in`.
+func (p *Parser) parseInParenRHS() (Node, error) {
+	textRange := p.startTextRange()
+	p.scanner.Next() // consume '('
+
+	first, err := p.parseUnaryTest()
+	if err != nil {
+		return nil, err
+	}
+
+	if p.CurrentToken().Expect("..") {
+		// Open-start range: (first..end) or (first..end]
+		p.scanner.Next()
+		end, err := p.expression()
+		if err != nil {
+			return nil, err
+		}
+		endOpen := p.CurrentToken().Expect(")")
+		if !p.CurrentToken().Expect(")", "]") {
+			return nil, p.Unexpected(")", "]")
+		}
+		p.scanner.Next()
+		textRange.End = p.CurrentToken().Pos
+		return &RangeNode{StartOpen: true, Start: first, EndOpen: endOpen, End: end, textRange: textRange}, nil
+	}
+
+	if p.CurrentToken().Expect(",") {
+		// List of tests: plain values become equality tests so (1, <5) means ?=1 or ?<5
+		elements := []Node{wrapAsUnaryEq(first)}
+		for p.CurrentToken().Expect(",") {
+			p.scanner.Next()
+			elem, err := p.parseUnaryTest()
+			if err != nil {
+				return nil, err
+			}
+			elements = append(elements, wrapAsUnaryEq(elem))
+		}
+		if !p.CurrentToken().Expect(")") {
+			return nil, p.Unexpected(")")
+		}
+		p.scanner.Next()
+		textRange.End = p.CurrentToken().Pos
+		return &MultiTests{Elements: elements, textRange: textRange}, nil
+	}
+
+	// Single value in parens: (first)
+	if !p.CurrentToken().Expect(")") {
+		return nil, p.Unexpected(")")
+	}
+	p.scanner.Next()
+	return first, nil
+}
+
+// wrapAsUnaryEq wraps a node as ?=node unless it is already a unary test
+// (a Binop whose LHS is the implicit-input variable ?).
+func wrapAsUnaryEq(n Node) Node {
+	if b, ok := n.(*Binop); ok {
+		if v, ok := b.Left.(*Var); ok && v.Name == "?" {
+			return n
+		}
+	}
+	return &Binop{Left: &Var{Name: "?"}, Op: "=", Right: n}
 }
 
 func (p *Parser) betweenOp() (Node, error) {
