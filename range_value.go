@@ -12,6 +12,20 @@ type RangeValue struct {
 	End     any
 }
 
+func (rv RangeValue) GetAttr(name string) (any, bool) {
+	switch name {
+	case "start":
+		return rv.Start, true
+	case "end":
+		return rv.End, true
+	case "start included":
+		return !rv.StartOpen, true
+	case "end included":
+		return !rv.EndOpen, true
+	}
+	return nil, false
+}
+
 func (rv RangeValue) BeforePoint(p any) (bool, error) {
 	pos, err := rv.Position(p)
 	if err != nil {
