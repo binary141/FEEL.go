@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/superisaac/FEEL.go"
 	"io"
 	"os"
+
+	feel "github.com/binary141/FEEL.go"
 )
 
 func main() {
