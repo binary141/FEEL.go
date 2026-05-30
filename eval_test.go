@@ -91,6 +91,15 @@ func TestEvalPairs(t *testing.T) {
 		{`substring("foobar", -6, 6)`, "foobar", ""},
 		{`substring("foobar", 3, 3.8)`, "oba", ""},
 		{`substring(string: "foobar", start position: 3)`, "obar", ""},
+
+		// string() conversion
+		{`string()`, Null, ""},
+		{`string("foo", "bar")`, Null, ""},
+		{`string(null)`, Null, ""},
+		{`string(123.45)`, "123.45", ""},
+		{`string(true)`, "true", ""},
+		{`string({":": "foo"})`, `{":": "foo"}`, ""},
+
 		{`not({})`, true, ""},
 		{`not({a: 1})`, false, ""},
 

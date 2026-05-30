@@ -49,11 +49,117 @@ func extractList(args map[string]any, argName string) ([]any, error) {
 	}
 }
 
+func feelNumberString(n *Number) string {
+	s := n.String()
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
+	}
+	return s
+}
+
+func feelContextKeyNeedsQuotes(k string) bool {
+	for _, r := range k {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '_' || r == ' ' || r == '-' || r == '.') {
+			return true
+		}
+	}
+	return len(k) == 0
+}
+
+func feelToString(v any) (any, error) {
+	switch vv := v.(type) {
+	case *NullValue:
+		return Null, nil
+	case string:
+		return vv, nil
+	case bool:
+		if vv {
+			return "true", nil
+		}
+		return "false", nil
+	case *Number:
+		return feelNumberString(vv), nil
+	case *FEELDate:
+		return vv.String(), nil
+	case *FEELTime:
+		return vv.String(), nil
+	case *FEELDatetime:
+		return vv.String(), nil
+	case *FEELDuration:
+		return vv.String(), nil
+	case map[string]any:
+		return feelContextString(vv)
+	case []any:
+		return feelListString(vv)
+	default:
+		return fmt.Sprintf("%v", v), nil
+	}
+}
+
+func feelContextString(m map[string]any) (string, error) {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(m))
+	for _, k := range keys {
+		valStr, err := feelItemString(m[k])
+		if err != nil {
+			return "", err
+		}
+		if feelContextKeyNeedsQuotes(k) {
+			parts = append(parts, fmt.Sprintf("%q: %s", k, valStr))
+		} else {
+			parts = append(parts, k+": "+valStr)
+		}
+	}
+	return "{" + strings.Join(parts, ", ") + "}", nil
+}
+
+func feelListString(list []any) (string, error) {
+	parts := make([]string, 0, len(list))
+	for _, item := range list {
+		s, err := feelItemString(item)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, s)
+	}
+	return "[" + strings.Join(parts, ", ") + "]", nil
+}
+
+// feelItemString formats a value as it would appear inside a context or list
+// (strings are quoted, everything else uses feelToString).
+func feelItemString(v any) (string, error) {
+	if _, isNull := v.(*NullValue); isNull {
+		return "null", nil
+	}
+	result, err := feelToString(v)
+	if err != nil {
+		return "", err
+	}
+	if s, ok := result.(string); ok {
+		if _, wasString := v.(string); wasString {
+			return fmt.Sprintf("%q", s), nil
+		}
+		return s, nil
+	}
+	return "null", nil
+}
+
 func installBuiltinFunctions(prelude *Prelude) {
 	// conversion functions
-	prelude.Bind("string", wrapTyped(func(v any) (string, error) {
-		return fmt.Sprintf("%s", v), nil
-	}).Required("from"))
+	prelude.Bind("string", NewNativeFunc(func(args map[string]any) (any, error) {
+		_, hasExtra := args["__extra"]
+		v, hasFrom := args["from"]
+		if !hasFrom || hasExtra {
+			return Null, nil
+		}
+		return feelToString(v)
+	}).Optional("from").Vararg("__extra"))
 
 	prelude.Bind("number", wrapTyped(func(v any) (*Number, error) {
 		return ParseNumberWithErr(v)
