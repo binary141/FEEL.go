@@ -53,6 +53,12 @@ func TestEvalPairs(t *testing.T) {
 		{`some x in [3, 4, 5] satisfies x >= 4`, N(4), ""},
 		{`every y in [3, 4, 5] satisfies y >= 4`, []any{N(4), N(5)}, ""},
 
+		// exponent
+		{`3 ** 2`, N(9), ""},
+		{`2 ** 10`, N(1024), ""},
+		{`"foo" ** 4`, Null, ""},
+		{`true ** 4`, Null, ""},
+
 		// null check
 		{`a != null and a.b > 10`, false, ""},
 		{`a = null or a.b > 10`, true, ""},

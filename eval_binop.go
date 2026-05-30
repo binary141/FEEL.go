@@ -263,10 +263,20 @@ func (binop Binop) mulOp(intp *Interpreter) (any, error) {
 }
 
 func (binop Binop) powOp(intp *Interpreter) (any, error) {
-	return binop.numberOp(
-		intp,
-		func(a, b *Number) any { return a.Pow(b) },
-		"**")
+	leftVal, err := binop.Left.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	rightVal, err := binop.Right.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	leftNumber, leftOk := leftVal.(*Number)
+	rightNumber, rightOk := rightVal.(*Number)
+	if !leftOk || !rightOk {
+		return Null, nil
+	}
+	return leftNumber.Pow(rightNumber), nil
 }
 
 func (binop Binop) divOp(intp *Interpreter) (any, error) {
