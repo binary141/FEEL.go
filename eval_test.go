@@ -86,6 +86,11 @@ func TestEvalPairs(t *testing.T) {
 
 		{`substring(string: "abcdef", start position: 3, length: 3)`, "cde", ""},
 		{`substring(string: "abcdef", start position: 200, length: 3)`, "", ""},
+		{`substring("foobar", -2, 1)`, "a", ""},
+		{`substring("foob r", -2, 1)`, " ", ""},
+		{`substring("foobar", -6, 6)`, "foobar", ""},
+		{`substring("foobar", 3, 3.8)`, "oba", ""},
+		{`substring(string: "foobar", start position: 3)`, "obar", ""},
 		{`not({})`, true, ""},
 		{`not({a: 1})`, false, ""},
 

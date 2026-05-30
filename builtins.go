@@ -101,15 +101,25 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err := decodeKWArgs(kwargs, &args); err != nil {
 			return nil, err
 		}
-		startPos := fromFEELIndex(args.StartPos.Int())
-		if startPos >= len(args.Str) {
+		strLen := len(args.Str)
+		rawStart := args.StartPos.Int()
+		var startPos int
+		if rawStart < 0 {
+			startPos = strLen + rawStart
+		} else {
+			startPos = rawStart - 1
+		}
+		if startPos < 0 {
+			startPos = 0
+		}
+		if startPos >= strLen {
 			return "", nil
 		}
-		endPos := len(args.Str)
+		endPos := strLen
 		if args.Length != nil {
 			endPos = startPos + int(args.Length.Int64())
-			if endPos >= len(args.Str) {
-				endPos = len(args.Str)
+			if endPos > strLen {
+				endPos = strLen
 			}
 		}
 		subs := args.Str[startPos:endPos]
