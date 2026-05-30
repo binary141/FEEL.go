@@ -13,6 +13,16 @@ func typeIsStruct(tp reflect.Type) bool {
 }
 
 func interfaceToValue(a interface{}, outputType reflect.Type) (reflect.Value, error) {
+	if outputType.Kind() == reflect.Interface {
+		if a == nil {
+			return reflect.Zero(outputType), nil
+		}
+		v := reflect.ValueOf(a)
+		if !v.Type().Implements(outputType) {
+			return reflect.Value{}, fmt.Errorf("cannot use %s as type %s", v.Type(), outputType)
+		}
+		return v, nil
+	}
 	output := reflect.Zero(outputType).Interface()
 	config := &mapstructure.DecoderConfig{
 		Metadata: nil,
