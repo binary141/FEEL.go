@@ -133,6 +133,14 @@ var datePatterns = []string{
 }
 
 func ParseDate(timeStr string) (*FEELDate, error) {
+	if len(timeStr) > 1 && timeStr[0] == '-' && timeStr[1] >= '0' && timeStr[1] <= '9' {
+		d, err := ParseDate(timeStr[1:])
+		if err != nil {
+			return nil, err
+		}
+		negT := time.Date(-d.t.Year(), d.t.Month(), d.t.Day(), 0, 0, 0, 0, d.t.Location())
+		return &FEELDate{t: negT}, nil
+	}
 	for _, pat := range datePatterns {
 		if t, err := time.Parse(pat, timeStr); err == nil {
 			return &FEELDate{t: t}, nil
@@ -240,6 +248,16 @@ var dateTimePatterns = []string{
 }
 
 func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
+	// Handle negative years like "-2016-01-30T09:05:00"
+	if len(temporalStr) > 1 && temporalStr[0] == '-' && temporalStr[1] >= '0' && temporalStr[1] <= '9' {
+		dt, err := ParseDatetime(temporalStr[1:])
+		if err != nil {
+			return nil, err
+		}
+		t := dt.t
+		negT := time.Date(-t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+		return &FEELDatetime{t: negT, src: temporalStr}, nil
+	}
 	// date-only: normalize to YYYY-MM-DDTHH:MM:SS
 	if matched, _ := regexp.MatchString(`^\d{4}-\d{2}-\d{2}$`, temporalStr); matched {
 		if t, err := time.Parse("2006-01-02", temporalStr); err == nil {
@@ -476,6 +494,14 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 	return nil, ErrParseTemporal
 }
 
+func MustParseDuration(s string) *FEELDuration {
+	d, err := ParseDuration(s)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
 func ParseTemporalValue(temporalStr string) (interface{}, error) {
 	if v, err := ParseDatetime(temporalStr); err == nil {
 		return v, nil
@@ -495,8 +521,23 @@ func ParseTemporalValue(temporalStr string) (interface{}, error) {
 // builtin functions
 func installDatetimeFunctions(prelude *Prelude) {
 	// conversions
-	prelude.Bind("date", wrapTyped(func(frm string) (interface{}, error) {
-		return ParseDate(frm)
+	prelude.Bind("date", NewNativeFunc(func(args map[string]any) (any, error) {
+		fromVal, ok := args["from"]
+		if !ok {
+			return Null, nil
+		}
+		if _, isNull := fromVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		frm, ok := fromVal.(string)
+		if !ok {
+			return Null, nil
+		}
+		d, err := ParseDate(frm)
+		if err != nil {
+			return Null, nil
+		}
+		return d, nil
 	}).Required("from"))
 
 	prelude.Bind("time", wrapTyped(func(frm string) (interface{}, error) {
@@ -563,4 +604,51 @@ func installDatetimeFunctions(prelude *Prelude) {
 		lastDay := nextFirstDay.Add(-24 * time.Hour) // 1 day before
 		return lastDay.Day(), nil
 	}).Required("date"))
+
+	prelude.Bind("years and months duration", NewNativeFunc(func(args map[string]any) (any, error) {
+		if _, hasExtra := args["__extra"]; hasExtra {
+			return Null, nil
+		}
+		fromVal, hasFrom := args["from"]
+		toVal, hasTo := args["to"]
+		if !hasFrom || !hasTo {
+			return Null, nil
+		}
+		if _, isNull := fromVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		if _, isNull := toVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		fromDate, okFrom := fromVal.(HasDate)
+		toDate, okTo := toVal.(HasDate)
+		if !okFrom || !okTo {
+			return Null, nil
+		}
+		from := fromDate.Date()
+		to := toDate.Date()
+
+		fromYear := from.Year()
+		fromMonth := int(from.Month())
+		fromDay := from.Day()
+		toYear := to.Year()
+		toMonth := int(to.Month())
+		toDay := to.Day()
+
+		totalMonths := (toYear-fromYear)*12 + (toMonth - fromMonth)
+		if totalMonths > 0 && toDay < fromDay {
+			totalMonths--
+		} else if totalMonths < 0 && toDay > fromDay {
+			totalMonths++
+		}
+
+		dur := &FEELDuration{IsYM: true}
+		if totalMonths < 0 {
+			dur.Neg = true
+			totalMonths = -totalMonths
+		}
+		dur.Years = totalMonths / 12
+		dur.Months = totalMonths % 12
+		return dur, nil
+	}).Optional("from", "to").Vararg("__extra"))
 }
