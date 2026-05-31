@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -24,7 +25,8 @@ type HasDate interface {
 
 // time
 type FEELTime struct {
-	t time.Time
+	t   time.Time
+	src string
 }
 
 func (st FEELTime) Time() time.Time {
@@ -32,15 +34,33 @@ func (st FEELTime) Time() time.Time {
 }
 
 var timePatterns = []string{
-	"15:04:05",
+	"15:04:05.999999999-07:00:00",
+	"15:04:05.999999999-07:00",
+	"15:04:05.999999999",
+	"15:04:05-07:00:00",
 	"15:04:05-07:00",
 	"15:04:05@MST",
+	"15:04:05",
 }
 
 func ParseTime(temporalStr string) (*FEELTime, error) {
+	if atIdx := strings.Index(temporalStr, "@"); atIdx > 0 {
+		timePart := temporalStr[:atIdx]
+		tzName := temporalStr[atIdx+1:]
+		if strings.Contains(tzName, "/") || len(tzName) > 3 {
+			if loc, err := time.LoadLocation(tzName); err == nil {
+				for _, pat := range []string{"15:04:05.999999999", "15:04:05"} {
+					if t, err := time.ParseInLocation(pat, timePart, loc); err == nil {
+						return &FEELTime{t: t, src: temporalStr}, nil
+					}
+				}
+			}
+			return nil, ErrParseTemporal
+		}
+	}
 	for _, pat := range timePatterns {
 		if t, err := time.Parse(pat, temporalStr); err == nil {
-			return &FEELTime{t: t}, nil
+			return &FEELTime{t: t, src: temporalStr}, nil
 		}
 	}
 	return nil, ErrParseTemporal
@@ -69,6 +89,9 @@ func (st FEELTime) MarshalJSON() ([]byte, error) {
 }
 
 func (st FEELTime) String() string {
+	if st.src != "" {
+		return st.src
+	}
 	return st.t.Format("15:04:05-07:00")
 }
 
@@ -120,7 +143,8 @@ func ParseDate(timeStr string) (*FEELDate, error) {
 
 // Date and Time
 type FEELDatetime struct {
-	t time.Time
+	t   time.Time
+	src string
 }
 
 func (sdt FEELDatetime) Time() time.Time {
@@ -174,6 +198,9 @@ func (sdt FEELDatetime) MarshalJSON() ([]byte, error) {
 }
 
 func (sdt FEELDatetime) String() string {
+	if sdt.src != "" {
+		return sdt.src
+	}
 	return sdt.t.Format("2006-01-02T15:04:05@MST")
 }
 
@@ -203,15 +230,40 @@ func (sdt *FEELDatetime) Sub(v HasTime) *FEELDuration {
 }
 
 var dateTimePatterns = []string{
-	"2006-01-02T15:04:05",
+	"2006-01-02T15:04:05.999999999-07:00:00",
+	"2006-01-02T15:04:05.999999999-07:00",
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02T15:04:05-07:00:00",
 	"2006-01-02T15:04:05-07:00",
 	"2006-01-02T15:04:05@MST",
+	"2006-01-02T15:04:05",
 }
 
 func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
+	// date-only: normalize to YYYY-MM-DDTHH:MM:SS
+	if matched, _ := regexp.MatchString(`^\d{4}-\d{2}-\d{2}$`, temporalStr); matched {
+		if t, err := time.Parse("2006-01-02", temporalStr); err == nil {
+			return &FEELDatetime{t: t, src: temporalStr + "T00:00:00"}, nil
+		}
+	}
+	// @IANA timezone with slash or long name (e.g. Etc/UTC)
+	if atIdx := strings.LastIndex(temporalStr, "@"); atIdx > 10 {
+		tzName := temporalStr[atIdx+1:]
+		if strings.Contains(tzName, "/") || len(tzName) > 3 {
+			dtPart := temporalStr[:atIdx]
+			if loc, err := time.LoadLocation(tzName); err == nil {
+				for _, pat := range []string{"2006-01-02T15:04:05.999999999", "2006-01-02T15:04:05"} {
+					if t, err := time.ParseInLocation(pat, dtPart, loc); err == nil {
+						return &FEELDatetime{t: t, src: temporalStr}, nil
+					}
+				}
+			}
+			return nil, ErrParseTemporal
+		}
+	}
 	for _, pat := range dateTimePatterns {
 		if t, err := time.Parse(pat, temporalStr); err == nil {
-			return &FEELDatetime{t: t}, nil
+			return &FEELDatetime{t: t, src: temporalStr}, nil
 		}
 	}
 	return nil, ErrParseTemporal
@@ -226,13 +278,15 @@ func MustParseDatetime(temporalStr string) *FEELDatetime {
 }
 
 type FEELDuration struct {
-	Neg     bool
-	Years   int
-	Months  int
-	Days    int
-	Hours   int
-	Minutes int
-	Seconds int
+	IsYM        bool
+	Neg         bool
+	Years       int
+	Months      int
+	Days        int
+	Hours       int
+	Minutes     int
+	Seconds     int
+	SecondsFrac string // e.g. ".1234" when present
 }
 
 func NewFEELDuration(dur time.Duration) *FEELDuration {
@@ -286,7 +340,7 @@ func (dur FEELDuration) Duration() time.Duration {
 }
 
 func (dur FEELDuration) IsYearMonth() bool {
-	return dur.Years != 0 || dur.Months != 0
+	return dur.IsYM
 }
 
 func (dur FEELDuration) TotalMonths() int64 {
@@ -304,51 +358,60 @@ func (dur *FEELDuration) Negative() *FEELDuration {
 }
 
 func (dur FEELDuration) String() string {
-	sYear, sMonth, sDay, sHour, sMinute, sSecond := "", "", "", "", "", ""
-	sNeg := ""
+	neg := ""
 	if dur.Neg {
-		sNeg = "-"
+		neg = "-"
 	}
-	if dur.Years != 0 {
-		sYear = fmt.Sprintf("%dY", dur.Years)
+	if dur.IsYM {
+		if dur.Years == 0 && dur.Months == 0 {
+			return neg + "P0Y"
+		}
+		s := ""
+		if dur.Years != 0 {
+			s += fmt.Sprintf("%dY", dur.Years)
+		}
+		if dur.Months != 0 {
+			s += fmt.Sprintf("%dM", dur.Months)
+		}
+		return neg + "P" + s
 	}
-	if dur.Months != 0 {
-		sMonth = fmt.Sprintf("%dM", dur.Months)
+	// day-time duration
+	if dur.Days == 0 && dur.Hours == 0 && dur.Minutes == 0 && dur.Seconds == 0 && dur.SecondsFrac == "" {
+		return neg + "PT0S"
 	}
+	sDay, sTime := "", ""
 	if dur.Days != 0 {
 		sDay = fmt.Sprintf("%dD", dur.Days)
 	}
-
 	if dur.Hours != 0 {
-		sHour = fmt.Sprintf("%dH", dur.Hours)
+		sTime += fmt.Sprintf("%dH", dur.Hours)
 	}
 	if dur.Minutes != 0 {
-		sMinute = fmt.Sprintf("%dM", dur.Minutes)
+		sTime += fmt.Sprintf("%dM", dur.Minutes)
 	}
-	if dur.Seconds != 0 {
-		sSecond = fmt.Sprintf("%dS", dur.Seconds)
+	if dur.Seconds != 0 || dur.SecondsFrac != "" {
+		sTime += fmt.Sprintf("%d%sS", dur.Seconds, dur.SecondsFrac)
 	}
-	if sYear != "" || sMonth != "" {
-		return fmt.Sprintf("%sP%s%s", sNeg, sYear, sMonth)
-	} else if sHour != "" || sMinute != "" || sSecond != "" {
-		return fmt.Sprintf("%sP%sT%s%s%s", sNeg, sDay, sHour, sMinute, sSecond)
-	} else {
-		return fmt.Sprintf("%sP%s", sNeg, sDay)
+	if sTime != "" {
+		return neg + "P" + sDay + "T" + sTime
 	}
+	return neg + "P" + sDay
 }
 
 var yearmonthDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)Y)?((\d+)M)?$`)
-// T(ime) separator is optional when no time components (H/M/S) are present (e.g. "P1D" is valid)
-var timeDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)D)?(T((\d+)H)?((\d+)M)?((\d+)S)?)?$`)
+
+// groups: [1]=neg [2]=dayspart [3]=daysval [4]=timepart [5]=hourspart [6]=hoursval
+//
+//	[7]=minspart [8]=minsval [9]=secspart [10]=secsval [11]=secsfrac
+var timeDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)D)?(T((\d+)H)?((\d+)M)?((\d+)(\.\d+)?S)?)?$`)
 
 func ParseDuration(temporalStr string) (*FEELDuration, error) {
-	// parse year month duration
+	// parse year-month duration
 	if submatches := yearmonthDurationPattern.FindStringSubmatch(temporalStr); submatches != nil {
-		dur := &FEELDuration{}
+		dur := &FEELDuration{IsYM: true}
 		if submatches[1] != "" {
 			dur.Neg = true
 		}
-
 		if submatches[2] != "" {
 			y, err := strconv.ParseInt(submatches[3], 10, 64)
 			if err != nil {
@@ -361,16 +424,15 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 			if err != nil {
 				return nil, err
 			}
-			if m > 12 {
-				return nil, errors.New("months cannot exceed 12")
-			}
 			dur.Months = int(m)
+			// normalize months >= 12 into years
+			dur.Years += dur.Months / 12
+			dur.Months = dur.Months % 12
 		}
 		return dur, nil
 	}
 
-	// parse day time duration
-	// groups: [1]=neg [2]=dayspart [3]=daysval [4]=timepart [5]=hourspart [6]=hoursval [7]=minspart [8]=minsval [9]=secspart [10]=secsval
+	// parse day-time duration
 	if submatches := timeDurationPattern.FindStringSubmatch(temporalStr); submatches != nil {
 		dur := &FEELDuration{}
 		if submatches[1] != "" {
@@ -388,18 +450,15 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 			if err != nil {
 				return nil, err
 			}
-			if v > 24 {
-				return nil, errors.New("hours cannot exceed 24")
-			}
 			dur.Hours = int(v)
+			// normalize hours >= 24 into days
+			dur.Days += dur.Hours / 24
+			dur.Hours = dur.Hours % 24
 		}
 		if submatches[7] != "" {
 			v, err := strconv.ParseInt(submatches[8], 10, 64)
 			if err != nil {
 				return nil, err
-			}
-			if v > 60 {
-				return nil, errors.New("minutes cannot exceed 60")
 			}
 			dur.Minutes = int(v)
 		}
@@ -408,10 +467,8 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 			if err != nil {
 				return nil, err
 			}
-			if v > 60 {
-				return nil, errors.New("seconds cannot exceed 60")
-			}
 			dur.Seconds = int(v)
+			dur.SecondsFrac = submatches[11] // ".1234" or ""
 		}
 		return dur, nil
 	}

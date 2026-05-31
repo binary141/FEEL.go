@@ -92,13 +92,51 @@ func TestEvalPairs(t *testing.T) {
 		{`substring("foobar", 3, 3.8)`, "oba", ""},
 		{`substring(string: "foobar", start position: 3)`, "obar", ""},
 
-		// string() conversion
+		// string() conversion — argument count
 		{`string()`, Null, ""},
 		{`string("foo", "bar")`, Null, ""},
+		{`string(from: "foo")`, "foo", ""},
+
+		// string() — type coercion
 		{`string(null)`, Null, ""},
+		{`string("foo")`, "foo", ""},
 		{`string(123.45)`, "123.45", ""},
 		{`string(true)`, "true", ""},
+		{`string(false)`, "false", ""},
+
+		// string() — date/time/datetime
+		{`string(date("2018-12-10"))`, "2018-12-10", ""},
+		{`string(date and time("2018-12-10"))`, "2018-12-10T00:00:00", ""},
+		{`string(date and time("2018-12-10T10:30:00.0001"))`, "2018-12-10T10:30:00.0001", ""},
+		{`string(date and time("2018-12-10T10:30:00.0001+05:00:01"))`, "2018-12-10T10:30:00.0001+05:00:01", ""},
+		{`string(date and time("2018-12-10T10:30:00@Etc/UTC"))`, "2018-12-10T10:30:00@Etc/UTC", ""},
+		{`string(time("10:30:00.0001"))`, "10:30:00.0001", ""},
+		{`string(time("10:30:00.0001+05:00:01"))`, "10:30:00.0001+05:00:01", ""},
+		{`string(time("10:30:00@Etc/UTC"))`, "10:30:00@Etc/UTC", ""},
+
+		// string() — duration
+		{`string(duration("P1D"))`, "P1D", ""},
+		{`string(duration("-P1D"))`, "-P1D", ""},
+		{`string(duration("P0D"))`, "PT0S", ""},
+		{`string(duration("P1DT2H3M4.1234S"))`, "P1DT2H3M4.1234S", ""},
+		{`string(duration("PT49H"))`, "P2DT1H", ""},
+		{`string(duration("P1Y"))`, "P1Y", ""},
+		{`string(duration("-P1Y"))`, "-P1Y", ""},
+		{`string(duration("P0Y"))`, "P0Y", ""},
+		{`string(duration("P1Y2M"))`, "P1Y2M", ""},
+		{`string(duration("P25M"))`, "P2Y1M", ""},
+
+		// string() — list and context
+		{`string([1, 2, 3, "foo"])`, `[1, 2, 3, "foo"]`, ""},
+		{`string([1, 2, 3, [4, 5, "foo"]])`, `[1, 2, 3, [4, 5, "foo"]]`, ""},
+		{"string([\"\\\"foo\\\"\"])", `["\"foo\""]`, ""},
+		{`string({a: "foo"})`, `{a: "foo"}`, ""},
+		{`string({a: "foo", b: {bar: "baz"}})`, `{a: "foo", b: {bar: "baz"}}`, ""},
+		{"string({\"{\":\"foo\"})", `{"{": "foo"}`, ""},
 		{`string({":": "foo"})`, `{":": "foo"}`, ""},
+		{"string({\",\":\"foo\"})", `{",": "foo"}`, ""},
+		{"string({\"}\":\"foo\"})", `{"}": "foo"}`, ""},
+		{"string({\"\\\"\":\"foo\"})", `{"\"": "foo"}`, ""},
 
 		{`not({})`, true, ""},
 		{`not({a: 1})`, false, ""},
