@@ -190,6 +190,49 @@ func roundCeiling(n *Number, scale int64) *Number {
 	return &Number{v: new(big.Float).SetPrec(Prec).SetRat(resultRat)}
 }
 
+func roundHalfUp(n *Number, scale int64) *Number {
+	if scale >= 34 {
+		return n
+	}
+	rat, _ := n.v.Rat(nil)
+	absScale := scale
+	if absScale < 0 {
+		absScale = -absScale
+	}
+	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(absScale), nil)
+	factorRat := new(big.Rat).SetInt(factor)
+	shifted := new(big.Rat)
+	if scale >= 0 {
+		shifted.Mul(rat, factorRat)
+	} else {
+		shifted.Quo(rat, factorRat)
+	}
+	p := new(big.Int).Set(shifted.Num())
+	q := shifted.Denom()
+	t := new(big.Int)
+	r := new(big.Int)
+	t.QuoRem(p, q, r)
+	// 2*|r| >= q → round away from zero (ties go away from zero)
+	twoAbsR := new(big.Int).Mul(new(big.Int).Abs(r), big.NewInt(2))
+	var result *big.Int
+	if twoAbsR.Cmp(q) >= 0 {
+		if p.Sign() >= 0 {
+			result = new(big.Int).Add(t, big.NewInt(1))
+		} else {
+			result = new(big.Int).Sub(t, big.NewInt(1))
+		}
+	} else {
+		result = t
+	}
+	resultRat := new(big.Rat).SetInt(result)
+	if scale >= 0 {
+		resultRat.Quo(resultRat, factorRat)
+	} else {
+		resultRat.Mul(resultRat, factorRat)
+	}
+	return &Number{v: new(big.Float).SetPrec(Prec).SetRat(resultRat)}
+}
+
 func roundHalfDown(n *Number, scale int64) *Number {
 	if scale >= 34 {
 		return n
@@ -807,6 +850,38 @@ func installBuiltinFunctions(prelude *Prelude) {
 			return Null, nil
 		}
 		return roundHalfDown(n, scale), nil
+	}).Optional("n", "scale").Vararg("__extra"))
+
+	prelude.Bind("round half up", NewNativeFunc(func(args map[string]any) (any, error) {
+		_, hasExtra := args["__extra"]
+		nVal, hasN := args["n"]
+		scaleVal, hasScale := args["scale"]
+		if !hasN || !hasScale || hasExtra {
+			return Null, nil
+		}
+		if _, isNull := nVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		if _, isNull := scaleVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		n, ok := nVal.(*Number)
+		if !ok {
+			return Null, nil
+		}
+		scaleNum, ok := scaleVal.(*Number)
+		if !ok {
+			return Null, nil
+		}
+		_, acc := scaleNum.v.Int(nil)
+		if acc != big.Exact {
+			return Null, nil
+		}
+		scale := scaleNum.Int64()
+		if scale < -6111 || scale > 6176 {
+			return Null, nil
+		}
+		return roundHalfUp(n, scale), nil
 	}).Optional("n", "scale").Vararg("__extra"))
 
 	prelude.Bind("string join", NewNativeFunc(func(kwargs map[string]any) (any, error) {
