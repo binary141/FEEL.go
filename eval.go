@@ -234,12 +234,20 @@ func (node BetweenExpr) Eval(intp *Interpreter) (any, error) {
 	return lowerCmp <= 0 && upperCmp <= 0, nil
 }
 
+var typeNameAliases = map[string]string{
+	"date and time": "datetime",
+}
+
 func (node InstanceOfNode) Eval(intp *Interpreter) (any, error) {
 	val, err := node.Value.Eval(intp)
 	if err != nil {
 		return nil, err
 	}
-	return typeName(val) == node.TypeName, nil
+	expected := node.TypeName
+	if canonical, ok := typeNameAliases[expected]; ok {
+		expected = canonical
+	}
+	return typeName(val) == expected, nil
 }
 
 func (node RangeNode) Eval(intp *Interpreter) (any, error) {

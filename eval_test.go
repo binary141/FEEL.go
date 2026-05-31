@@ -70,6 +70,10 @@ func TestEvalPairs(t *testing.T) {
 		{`today() instance of date`, true, ""},
 		{`today(123)`, Null, ""},
 
+		// now() arg handling
+		{`now() instance of date and time`, true, ""},
+		{`now(123)`, Null, ""},
+
 		// instance of
 		{`123 instance of number`, true, ""},
 		{`"hello" instance of string`, true, ""},

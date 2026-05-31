@@ -512,9 +512,12 @@ func installDatetimeFunctions(prelude *Prelude) {
 	}).Required("from"))
 
 	// temporal functions
-	prelude.Bind("now", wrapTyped(func() (interface{}, error) {
+	prelude.Bind("now", NewNativeFunc(func(args map[string]any) (any, error) {
+		if _, hasExtra := args["__extra"]; hasExtra {
+			return Null, nil
+		}
 		return &FEELDatetime{t: time.Now()}, nil
-	}))
+	}).Vararg("__extra"))
 
 	prelude.Bind("today", NewNativeFunc(func(args map[string]any) (any, error) {
 		if _, hasExtra := args["__extra"]; hasExtra {

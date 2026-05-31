@@ -305,6 +305,15 @@ func (p *Parser) betweenOp() (Node, error) {
 		}
 		typeName := p.CurrentToken().Value
 		p.scanner.Next()
+		// Handle compound type names (e.g. "date and time")
+		for p.CurrentToken().ExpectKeywords("and") {
+			p.scanner.Next() // consume "and"
+			if p.CurrentToken().Kind != TokenName {
+				break
+			}
+			typeName += " and " + p.CurrentToken().Value
+			p.scanner.Next() // consume name after "and"
+		}
 		textRange.End = p.CurrentToken().Pos
 		return &InstanceOfNode{Value: left, TypeName: typeName, textRange: textRange}, nil
 	}
