@@ -294,6 +294,20 @@ func (p *Parser) betweenOp() (Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.CurrentToken().Kind == TokenName && p.CurrentToken().Value == "instance" {
+		p.scanner.Next()
+		if !(p.CurrentToken().Kind == TokenName && p.CurrentToken().Value == "of") {
+			return nil, p.Unexpected("of")
+		}
+		p.scanner.Next()
+		if p.CurrentToken().Kind != TokenName {
+			return nil, p.Unexpected("type name")
+		}
+		typeName := p.CurrentToken().Value
+		p.scanner.Next()
+		textRange.End = p.CurrentToken().Pos
+		return &InstanceOfNode{Value: left, TypeName: typeName, textRange: textRange}, nil
+	}
 	if !(p.CurrentToken().Kind == TokenName && p.CurrentToken().Value == "between") {
 		return left, nil
 	}

@@ -66,6 +66,18 @@ func TestEvalPairs(t *testing.T) {
 		// keyword arguments
 		{`sub(a: 4, b: 2)`, N(2), "{sub: (function(a, b) a - b)}"},
 
+		// today() arg handling
+		{`today() instance of date`, true, ""},
+		{`today(123)`, Null, ""},
+
+		// instance of
+		{`123 instance of number`, true, ""},
+		{`"hello" instance of string`, true, ""},
+		{`true instance of bool`, true, ""},
+		{`@"2023-06-07" instance of datetime`, true, ""},
+		{`date("2023-06-07") instance of date`, true, ""},
+		{`date("2023-06-07") instance of datetime`, false, ""},
+
 		// temporal expressions
 		{`last day of month(@"2020-02-11")`, N(29), ""},
 		{`last day of month(@"2021-01-07")`, N(31), ""},

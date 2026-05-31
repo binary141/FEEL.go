@@ -367,6 +367,20 @@ func (node SomeExpr) Repr() string {
 	return fmt.Sprintf("(some \"%s\" %s %s)", node.Varname, node.ListExpr.Repr(), node.FilterExpr.Repr())
 }
 
+// instance of expression: value instance of typeName
+type InstanceOfNode struct {
+	Value    Node
+	TypeName string
+	textRange TextRange
+}
+
+func (node InstanceOfNode) TextRange() TextRange {
+	return node.textRange
+}
+func (node InstanceOfNode) Repr() string {
+	return fmt.Sprintf("(instance-of %s %s)", node.Value.Repr(), node.TypeName)
+}
+
 // Every expression
 type EveryExpr struct {
 	Varname    string

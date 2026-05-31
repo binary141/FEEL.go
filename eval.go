@@ -234,6 +234,14 @@ func (node BetweenExpr) Eval(intp *Interpreter) (any, error) {
 	return lowerCmp <= 0 && upperCmp <= 0, nil
 }
 
+func (node InstanceOfNode) Eval(intp *Interpreter) (any, error) {
+	val, err := node.Value.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	return typeName(val) == node.TypeName, nil
+}
+
 func (node RangeNode) Eval(intp *Interpreter) (any, error) {
 	startVal, err := node.Start.Eval(intp)
 	if err != nil {

@@ -516,9 +516,12 @@ func installDatetimeFunctions(prelude *Prelude) {
 		return &FEELDatetime{t: time.Now()}, nil
 	}))
 
-	prelude.Bind("today", wrapTyped(func() (interface{}, error) {
+	prelude.Bind("today", NewNativeFunc(func(args map[string]any) (any, error) {
+		if _, hasExtra := args["__extra"]; hasExtra {
+			return Null, nil
+		}
 		return &FEELDate{t: time.Now()}, nil
-	}))
+	}).Vararg("__extra"))
 
 	prelude.Bind("day of week", wrapTyped(func(v HasDate) (interface{}, error) {
 		return v.Date().Weekday(), nil
