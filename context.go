@@ -153,15 +153,34 @@ func installContextFunctions(prelude *Prelude) {
 		}
 	}).Required("context", "key", "value"))
 
-	prelude.Bind("context merge", wrapTyped(func(contexts []map[string]any) (map[string]any, error) {
+	prelude.Bind("context merge", NewNativeFunc(func(kwargs map[string]any) (any, error) {
+		_, hasExtra := kwargs["__extra"]
+		if hasExtra {
+			return Null, nil
+		}
+
+		contextsVal, hasContexts := kwargs["contexts"]
+		if !hasContexts {
+			return Null, nil
+		}
+
+		contextsList, ok := contextsVal.([]any)
+		if !ok {
+			return Null, nil
+		}
+
 		merged := make(map[string]any)
-		for _, ctx := range contexts {
+		for _, item := range contextsList {
+			ctx, ok := item.(map[string]any)
+			if !ok {
+				return Null, nil
+			}
 			for k, v := range ctx {
 				merged[k] = v
 			}
 		}
 		return merged, nil
-	}).Required("contextx"))
+	}).Optional("contexts").Vararg("__extra"))
 
 	prelude.Bind("context", NewNativeFunc(func(args map[string]any) (any, error) {
 		_, hasExtra := args["__extra"]
