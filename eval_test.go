@@ -96,6 +96,24 @@ func TestEvalPairs(t *testing.T) {
 		{`round up(5.5, 6176)`, N("5.5"), ""},
 		{`round up(5.5, (6176 + 1))`, Null, ""},
 
+		// round half down
+		{`round half down(5.5, 0)`, N(5), ""},
+		{`round half down(-5.5, 0)`, N(-5), ""},
+		{`round half down(1.121, 2)`, N("1.12"), ""},
+		{`round half down(-1.126, 2)`, N("-1.13"), ""},
+		{`round half down()`, Null, ""},
+		{`round half down(null, 0)`, Null, ""},
+		{`round half down(1234, null)`, Null, ""},
+		{`round half down(1234.12, 1, 2)`, Null, ""},
+		{`round half down(n: 5.5, scale: 0)`, N(5), ""},
+		{`round half down(scale: 0)`, Null, ""},
+		{`round half down(n: 5.5, scale: 0, foo: 123)`, Null, ""},
+		{`round half down("123", 0)`, Null, ""},
+		{`round half down(5.5, "0")`, Null, ""},
+		{`round half down(5.5, (-6111 - 1))`, Null, ""},
+		{`round half down(5.5, 6176)`, N("5.5"), ""},
+		{`round half down(5.5, (6176 + 1))`, Null, ""},
+
 		// temporal expressions
 		{`last day of month(@"2020-02-11")`, N(29), ""},
 		{`last day of month(@"2021-01-07")`, N(31), ""},
