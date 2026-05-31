@@ -574,6 +574,20 @@ func (node FunCall) EvalMacro(intp *Interpreter, macro *Macro) (any, error) {
 				argNodes[argName] = ast
 			}
 		}
+		if macro.varArgName != "" {
+			knownKwArgs := make(map[string]bool, len(macro.requiredArgNames)+len(macro.optionalArgNames))
+			for _, n := range macro.requiredArgNames {
+				knownKwArgs[n] = true
+			}
+			for _, n := range macro.optionalArgNames {
+				knownKwArgs[n] = true
+			}
+			for k, v := range kwArgMap {
+				if !knownKwArgs[k] {
+					varArgs = append(varArgs, v)
+				}
+			}
+		}
 	} else {
 		if len(node.Args) < len(macro.requiredArgNames) {
 			//reqArgs := strings.Join(macro.requiredArgNames[len(node.Args):len(macro.requiredArgNames)], ", ")

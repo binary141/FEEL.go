@@ -884,6 +884,125 @@ func installBuiltinFunctions(prelude *Prelude) {
 		return roundHalfUp(n, scale), nil
 	}).Optional("n", "scale").Vararg("__extra"))
 
+	prelude.Bind("list replace", NewMacro(func(intp *Interpreter, args map[string]Node, varArgs []Node) (any, error) {
+		if len(varArgs) > 0 {
+			return Null, nil
+		}
+
+		listNode, hasList := args["list"]
+		positionNode, hasPosition := args["position"]
+		matchNode, hasMatch := args["match"]
+		newItemNode, hasNewItem := args["newItem"]
+
+		if !hasList || !hasNewItem {
+			return Null, nil
+		}
+		if hasPosition == hasMatch {
+			return Null, nil
+		}
+
+		listVal, err := listNode.Eval(intp)
+		if err != nil {
+			return Null, nil
+		}
+		if _, isNull := listVal.(*NullValue); isNull {
+			return Null, nil
+		}
+
+		var list []any
+		switch lv := listVal.(type) {
+		case []any:
+			list = lv
+		default:
+			list = []any{lv}
+		}
+
+		newItem, err := newItemNode.Eval(intp)
+		if err != nil {
+			return Null, nil
+		}
+
+		if hasPosition {
+			posVal, err := positionNode.Eval(intp)
+			if err != nil {
+				return Null, nil
+			}
+			// A function in the position slot means positional-call match mode
+			if fn, isFn := posVal.(*FunDef); isFn {
+				if len(fn.Args) != 2 {
+					return Null, nil
+				}
+				newList := make([]any, len(list))
+				copy(newList, list)
+				for i, item := range list {
+					result, err := fn.EvalCall(intp, []any{item, newItem})
+					if err != nil {
+						return Null, nil
+					}
+					bResult, ok := result.(bool)
+					if !ok {
+						return Null, nil
+					}
+					if bResult {
+						newList[i] = newItem
+					}
+				}
+				return newList, nil
+			}
+			if _, isNull := posVal.(*NullValue); isNull {
+				return Null, nil
+			}
+			posNum, ok := posVal.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			posInt := posNum.Int()
+			var idx int
+			if posInt > 0 {
+				idx = posInt - 1
+			} else if posInt < 0 {
+				idx = len(list) + posInt
+			} else {
+				return Null, nil
+			}
+			if idx < 0 || idx >= len(list) {
+				return Null, nil
+			}
+			newList := make([]any, len(list))
+			copy(newList, list)
+			newList[idx] = newItem
+			return newList, nil
+		}
+
+		matchVal, err := matchNode.Eval(intp)
+		if err != nil {
+			return Null, nil
+		}
+		matchFn, ok := matchVal.(*FunDef)
+		if !ok {
+			return Null, nil
+		}
+		if len(matchFn.Args) != 2 {
+			return Null, nil
+		}
+		newList := make([]any, len(list))
+		copy(newList, list)
+		for i, item := range list {
+			result, err := matchFn.EvalCall(intp, []any{item, newItem})
+			if err != nil {
+				return Null, nil
+			}
+			bResult, ok := result.(bool)
+			if !ok {
+				return Null, nil
+			}
+			if bResult {
+				newList[i] = newItem
+			}
+		}
+		return newList, nil
+	}).Optional("list", "position", "newItem", "match").Vararg("__extra"))
+
 	prelude.Bind("string join", NewNativeFunc(func(kwargs map[string]any) (any, error) {
 		type joinArgs struct {
 			List      []any  `json:"list"`
