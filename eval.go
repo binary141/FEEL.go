@@ -472,18 +472,32 @@ func (node FunCall) EvalNativeFun(intp *Interpreter, funDef *NativeFun) (any, er
 			return nil, err
 		}
 
+		knownKwArgs := make(map[string]bool, len(funDef.requiredArgNames)+len(funDef.optionalArgNames))
 		for _, argName := range funDef.requiredArgNames {
+			knownKwArgs[argName] = true
 			if v, ok := kwArgMap[argName]; ok {
 				argVals[argName] = v
 			} else {
-				//return nil, NewEvalError(-5001, "no keyword argument", fmt.Sprintf("no keyword argument %s", argName))
 				return nil, NewErrKeywordArgument(argName)
 			}
 		}
-
 		for _, argName := range funDef.optionalArgNames {
+			knownKwArgs[argName] = true
 			if v, ok := kwArgMap[argName]; ok {
 				argVals[argName] = v
+			}
+		}
+		if funDef.varArgName != "" {
+			for k, v := range kwArgMap {
+				if !knownKwArgs[k] {
+					if vars, ok := argVals[funDef.varArgName]; ok {
+						varargs := vars.([]any)
+						varargs = append(varargs, v)
+						argVals[funDef.varArgName] = varargs
+					} else {
+						argVals[funDef.varArgName] = []any{v}
+					}
+				}
 			}
 		}
 	} else {

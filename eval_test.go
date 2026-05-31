@@ -78,6 +78,24 @@ func TestEvalPairs(t *testing.T) {
 		{`date("2023-06-07") instance of date`, true, ""},
 		{`date("2023-06-07") instance of datetime`, false, ""},
 
+		// round up
+		{`round up(5.5, 0)`, N(6), ""},
+		{`round up(-5.5, 0)`, N(-5), ""},
+		{`round up(1.121, 2)`, N("1.13"), ""},
+		{`round up(-1.126, 2)`, N("-1.12"), ""},
+		{`round up()`, Null, ""},
+		{`round up(null, 0)`, Null, ""},
+		{`round up(1234.12, null)`, Null, ""},
+		{`round up(1234.12, 1, 2)`, Null, ""},
+		{`round up(n: 5.5, scale: 0)`, N(6), ""},
+		{`round up(scale: 0)`, Null, ""},
+		{`round up(n: 5.5, scale: 0, foo: 123)`, Null, ""},
+		{`round up("123", 0)`, Null, ""},
+		{`round up(5.5, "0")`, Null, ""},
+		{`round up(5.5, (-6111 - 1))`, Null, ""},
+		{`round up(5.5, 6176)`, N("5.5"), ""},
+		{`round up(5.5, (6176 + 1))`, Null, ""},
+
 		// temporal expressions
 		{`last day of month(@"2020-02-11")`, N(29), ""},
 		{`last day of month(@"2021-01-07")`, N(31), ""},
