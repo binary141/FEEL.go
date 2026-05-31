@@ -163,4 +163,56 @@ func installContextFunctions(prelude *Prelude) {
 		return merged, nil
 	}).Required("contextx"))
 
+	prelude.Bind("context", NewNativeFunc(func(args map[string]any) (any, error) {
+		_, hasExtra := args["__extra"]
+		if hasExtra {
+			return Null, nil
+		}
+		entriesVal, hasEntries := args["entries"]
+		if !hasEntries {
+			return Null, nil
+		}
+
+		var entriesList []any
+		switch ev := entriesVal.(type) {
+		case []any:
+			entriesList = ev
+		case map[string]any:
+			entriesList = []any{ev}
+		default:
+			return Null, nil
+		}
+
+		result := make(map[string]any)
+		for _, entry := range entriesList {
+			entryMap, ok := entry.(map[string]any)
+			if !ok {
+				return Null, nil
+			}
+			keyVal, hasKey := entryMap["key"]
+			if !hasKey {
+				return Null, nil
+			}
+			if _, isNull := keyVal.(*NullValue); isNull {
+				return Null, nil
+			}
+			keyStr, ok := keyVal.(string)
+			if !ok {
+				return Null, nil
+			}
+			if keyStr == "" {
+				return Null, nil
+			}
+			value, hasValue := entryMap["value"]
+			if !hasValue {
+				return Null, nil
+			}
+			if _, exists := result[keyStr]; exists {
+				return Null, nil
+			}
+			result[keyStr] = value
+		}
+		return result, nil
+	}).Optional("entries").Vararg("__extra"))
+
 }

@@ -204,6 +204,26 @@ func TestEvalPairs(t *testing.T) {
 		{`get value(context put({a: false}, ["b", "c", "d"], 4), ["b", "c"])`, map[string]any{"d": N(4)}, ""},
 		{`context merge([{x:1, y: 0}, {y:2}])`, map[string]any{"x": N(1), "y": N(2)}, ""},
 
+		// context() — build context from entries
+		{`context([{key:"a", value:1}, {key:"b", value:2}])`, map[string]any{"a": N(1), "b": N(2)}, ""},
+		{`context([{key:"a", value:1}])`, map[string]any{"a": N(1)}, ""},
+		{`context([{key:"a", value:1},{key:"a", value:2}])`, Null, ""},
+		{`context([]) = {}`, true, ""},
+		{`context({key:"a", value:1})`, map[string]any{"a": N(1)}, ""},
+		{`context({value:1})`, Null, ""},
+		{`context({key: null, value:1})`, Null, ""},
+		{`context({key: "a"})`, Null, ""},
+		{`context({key: "a", value: null})`, map[string]any{"a": Null}, ""},
+		{`context({key: "", value: 1})`, Null, ""},
+		{`context(null)`, Null, ""},
+		{`context()`, Null, ""},
+		{`context([], "foo")`, Null, ""},
+		{`context(entries: [{key:"a", value:1}])`, map[string]any{"a": N(1)}, ""},
+		{`context(entries: {key:"a", value:1})`, map[string]any{"a": N(1)}, ""},
+		{`context(entris: {key:"a", value:1})`, Null, ""},
+		{`context("foo")`, Null, ""},
+		{`context(entries: [{key:"a", value:1, ignored: "foo"}])`, map[string]any{"a": N(1)}, ""},
+
 		// range functions
 		{`before(1, 10)`, true, ""},
 		{`before(10, 1)`, false, ""},
