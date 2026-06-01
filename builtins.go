@@ -176,10 +176,10 @@ func roundCeiling(n *Number, scale int64) *Number {
 	var ceiling *big.Int
 	if r.Sign() == 0 {
 		ceiling = t
-	} else if p.Sign() > 0 {
+	} else if p.Sign() >= 0 {
 		ceiling = new(big.Int).Add(t, big.NewInt(1))
 	} else {
-		ceiling = t
+		ceiling = new(big.Int).Sub(t, big.NewInt(1))
 	}
 	resultRat := new(big.Rat).SetInt(ceiling)
 	if scale >= 0 {
@@ -212,14 +212,7 @@ func roundDown(n *Number, scale int64) *Number {
 	t := new(big.Int)
 	r := new(big.Int)
 	t.QuoRem(p, q, r)
-	var floor *big.Int
-	if r.Sign() == 0 {
-		floor = t
-	} else if p.Sign() < 0 {
-		floor = new(big.Int).Sub(t, big.NewInt(1))
-	} else {
-		floor = t
-	}
+	floor := t
 	resultRat := new(big.Rat).SetInt(floor)
 	if scale >= 0 {
 		resultRat.Quo(resultRat, factorRat)
