@@ -110,19 +110,42 @@ func (number *Number) IntDiv(other *Number) *Number {
 }
 
 func (number *Number) FloatDiv(other *Number) *Number {
-	a, _ := number.v.Float64()
-	b, _ := other.v.Float64()
 	newf := new(big.Float)
-	newf.SetPrec(Prec).SetFloat64(a / b)
+	newf.SetPrec(Prec).Quo(number.v, other.v)
 	return &Number{v: newf}
 }
 
 func (number *Number) Pow(exp *Number) *Number {
+	if exp.v.IsInt() {
+		n, _ := exp.v.Int64()
+		return number.powInt(n)
+	}
 	a, _ := number.v.Float64()
 	b, _ := exp.v.Float64()
 	newf := new(big.Float)
 	newf.SetPrec(Prec).SetFloat64(math.Pow(a, b))
 	return &Number{v: newf}
+}
+
+func (number *Number) powInt(n int64) *Number {
+	result := new(big.Float).SetPrec(Prec).SetInt64(1)
+	base := new(big.Float).SetPrec(Prec).Set(number.v)
+	negative := n < 0
+	if negative {
+		n = -n
+	}
+	for n > 0 {
+		if n&1 == 1 {
+			result.SetPrec(Prec).Mul(result, base)
+		}
+		base.SetPrec(Prec).Mul(base, base)
+		n >>= 1
+	}
+	if negative {
+		one := new(big.Float).SetPrec(Prec).SetInt64(1)
+		result.SetPrec(Prec).Quo(one, result)
+	}
+	return &Number{v: result}
 }
 
 func (number *Number) IsZero() bool {

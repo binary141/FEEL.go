@@ -621,3 +621,13 @@ func TestTemporalValue(t *testing.T) {
 	assert.Equal(t, 37, dur3.Minutes)
 	assert.Equal(t, 20, dur3.Seconds)
 }
+
+func TestLoanPayment(t *testing.T) {
+	expr := `(loan.principal*loan.rate/12)/(1-(1+loan.rate/12)**-loan.termMonths)`
+	ctx := `{loan: {principal: 600000, rate: 0.0375, termMonths: 360}, fee: 10000}`
+	v, err := EvalString(expr, ctx)
+	assert.NilError(t, err)
+	n, ok := v.(*Number)
+	assert.Assert(t, ok, "expected *Number result")
+	assert.Equal(t, n.v.Text('f', 11), "2778.69354943277")
+}
