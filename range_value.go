@@ -1,8 +1,11 @@
 package feel
 
 import (
-// "fmt"
+	"regexp"
+	"strings"
 )
+
+var dateOnlyPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 type RangeValue struct {
 	StartOpen bool
@@ -10,6 +13,8 @@ type RangeValue struct {
 
 	EndOpen bool
 	End     any
+
+	elementType string // set by range() function; empty means derive from Start
 }
 
 func (rv RangeValue) GetAttr(name string) (any, bool) {
@@ -156,6 +161,142 @@ func (rv RangeValue) overlapsAfter(other RangeValue) (bool, error) {
 	} else {
 		return true, nil
 	}
+}
+
+// rangeNodeElementType returns the full parameterized range type (e.g. "range<date>")
+// based on the AST node of one endpoint, without evaluating it.
+func rangeNodeElementType(node Node) string {
+	switch n := node.(type) {
+	case *NumberNode:
+		return "range<number>"
+	case *StringNode:
+		return "range<string>"
+	case *TemporalNode:
+		content := n.Content()
+		if dateOnlyPattern.MatchString(content) {
+			return "range<date>"
+		}
+		if _, err := ParseTime(content); err == nil {
+			return "range<time>"
+		}
+		if d, err := ParseDuration(content); err == nil {
+			if d.IsYearMonth() {
+				return "range<years and months duration>"
+			}
+			return "range<days and time duration>"
+		}
+		return "range<date and time>"
+	case *FunCall:
+		ref, ok := n.FunRef.(*Var)
+		if !ok {
+			return ""
+		}
+		switch ref.Name {
+		case "date":
+			return "range<date>"
+		case "date and time":
+			return "range<date and time>"
+		case "time":
+			return "range<time>"
+		case "duration":
+			strNode, ok := n.Args[0].arg.(*StringNode)
+			if !ok {
+				return ""
+			}
+			d, err := ParseDuration(strNode.Content())
+			if err != nil {
+				return ""
+			}
+			if d.IsYearMonth() {
+				return "range<years and months duration>"
+			}
+			return "range<days and time duration>"
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
+// isPureRangeEndpoint returns true when a range endpoint node is a pure literal
+// that can be safely evaluated without an ambient scope. Variable references and
+// calls with non-literal arguments are rejected so that range("…") cannot
+// accidentally access context variables.
+func isPureRangeEndpoint(node Node) bool {
+	switch n := node.(type) {
+	case *NumberNode, *StringNode, *TemporalNode:
+		return true
+	case *FunCall:
+		if n.keywordArgs || len(n.Args) != 1 {
+			return false
+		}
+		if _, ok := n.Args[0].arg.(*StringNode); !ok {
+			return false
+		}
+		ref, ok := n.FunRef.(*Var)
+		if !ok {
+			return false
+		}
+		switch ref.Name {
+		case "date", "date and time", "time", "duration":
+			return true
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func parseRangeString(s string) (any, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return Null, nil
+	}
+	node, err := ParseString(s)
+	if err != nil {
+		return Null, nil
+	}
+	rn, ok := node.(*RangeNode)
+	if !ok {
+		return Null, nil
+	}
+	if !isPureRangeEndpoint(rn.Start) || !isPureRangeEndpoint(rn.End) {
+		return Null, nil
+	}
+	startElemType := rangeNodeElementType(rn.Start)
+	endElemType := rangeNodeElementType(rn.End)
+	if startElemType == "" || startElemType != endElemType {
+		return Null, nil
+	}
+	intp := NewIntepreter()
+	startVal, err := rn.Start.Eval(intp)
+	if err != nil {
+		return Null, nil
+	}
+	endVal, err := rn.End.Eval(intp)
+	if err != nil {
+		return Null, nil
+	}
+	if _, isNull := startVal.(*NullValue); isNull {
+		return Null, nil
+	}
+	if _, isNull := endVal.(*NullValue); isNull {
+		return Null, nil
+	}
+	cmp, err := compareInterfaces(startVal, endVal)
+	if err != nil {
+		return Null, nil
+	}
+	if cmp > 0 {
+		return Null, nil
+	}
+	return &RangeValue{
+		Start:       startVal,
+		StartOpen:   rn.StartOpen,
+		End:         endVal,
+		EndOpen:     rn.EndOpen,
+		elementType: startElemType,
+	}, nil
 }
 
 func installRangeFunctions(prelude *Prelude) {
@@ -363,6 +504,21 @@ func installRangeFunctions(prelude *Prelude) {
 			return r == 0, nil
 		}
 	}).Required("a", "b"))
+
+	prelude.Bind("range", NewNativeFunc(func(kwargs map[string]any) (any, error) {
+		if _, hasExtra := kwargs["__extra"]; hasExtra {
+			return Null, nil
+		}
+		fromVal, ok := kwargs["from"]
+		if !ok {
+			return Null, nil
+		}
+		strVal, ok := fromVal.(string)
+		if !ok {
+			return Null, nil
+		}
+		return parseRangeString(strVal)
+	}).Optional("from").Vararg("__extra"))
 
 	prelude.Bind("coincides", NewNativeFunc(func(kwargs map[string]any) (any, error) {
 		type coincidesArgs struct {

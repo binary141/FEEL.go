@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // values
@@ -238,12 +239,44 @@ var typeNameAliases = map[string]string{
 	"date and time": "datetime",
 }
 
+func rangeElementTypeName(rv *RangeValue) string {
+	if rv.elementType != "" {
+		return rv.elementType
+	}
+	switch v := rv.Start.(type) {
+	case *Number:
+		return "range<number>"
+	case string:
+		return "range<string>"
+	case *FEELDate:
+		return "range<date>"
+	case *FEELDatetime:
+		return "range<date and time>"
+	case *FEELTime:
+		return "range<time>"
+	case *FEELDuration:
+		if v.IsYearMonth() {
+			return "range<years and months duration>"
+		}
+		return "range<days and time duration>"
+	default:
+		return "range"
+	}
+}
+
 func (node InstanceOfNode) Eval(intp *Interpreter) (any, error) {
 	val, err := node.Value.Eval(intp)
 	if err != nil {
 		return nil, err
 	}
 	expected := node.TypeName
+	if strings.HasPrefix(expected, "range<") {
+		rv, ok := val.(*RangeValue)
+		if !ok {
+			return false, nil
+		}
+		return rangeElementTypeName(rv) == expected, nil
+	}
 	if canonical, ok := typeNameAliases[expected]; ok {
 		expected = canonical
 	}

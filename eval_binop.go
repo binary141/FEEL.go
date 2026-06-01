@@ -135,6 +135,20 @@ func compareInterfaces(leftVal, rightVal any) (int, error) {
 		if rightMap, ok := rightVal.(map[string]any); ok {
 			return compareMaps(v, rightMap)
 		}
+	case *RangeValue:
+		if rightRange, ok := rightVal.(*RangeValue); ok {
+			if v.StartOpen != rightRange.StartOpen || v.EndOpen != rightRange.EndOpen {
+				return 1, nil
+			}
+			cmpStart, err := compareInterfaces(v.Start, rightRange.Start)
+			if err != nil {
+				return 0, err
+			}
+			if cmpStart != 0 {
+				return cmpStart, nil
+			}
+			return compareInterfaces(v.End, rightRange.End)
+		}
 	}
 	return 0, NewEvalError(-3106, "invalid types", fmt.Sprintf("bad type in comparation, %T vs. %T", leftVal, rightVal))
 }

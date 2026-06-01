@@ -46,7 +46,8 @@ func ParseString(input string) (Node, error) {
 }
 
 type Parser struct {
-	scanner *Scanner
+	scanner    *Scanner
+	inRangeEnd bool // when true, '[' is not consumed as index in parseFuncallOrIndexOrDot
 }
 
 func NewParser(scanner *Scanner) *Parser {
@@ -314,6 +315,20 @@ func (p *Parser) betweenOp() (Node, error) {
 			typeName += " and " + p.CurrentToken().Value
 			p.scanner.Next() // consume name after "and"
 		}
+		// Handle parameterized types (e.g. "range<number>", "range<date and time>")
+		if typeName == "range" && p.CurrentToken().Expect("<") {
+			p.scanner.Next() // consume '<'
+			innerParts := []string{}
+			for p.CurrentToken().Kind == TokenName || p.CurrentToken().ExpectKeywords("and") {
+				innerParts = append(innerParts, p.CurrentToken().Value)
+				p.scanner.Next()
+			}
+			if !p.CurrentToken().Expect(">") {
+				return nil, p.Unexpected(">")
+			}
+			p.scanner.Next() // consume '>'
+			typeName = "range<" + strings.Join(innerParts, " ") + ">"
+		}
 		textRange.End = p.CurrentToken().Pos
 		return &InstanceOfNode{Value: left, TypeName: typeName, textRange: textRange}, nil
 	}
@@ -408,6 +423,9 @@ func (p *Parser) parseFuncallOrIndexOrDot() (Node, error) {
 			}
 			exp = nexp
 		case "[":
+			if p.inRangeEnd {
+				return exp, nil
+			}
 			nexp, err := p.parseIndexRest(exp)
 			if err != nil {
 				return nil, err
@@ -559,6 +577,8 @@ func (p *Parser) singleElement() (Node, error) {
 		return p.parseBracketOrRange()
 	case "[":
 		return p.parseRangeOrArray()
+	case "]":
+		return p.parseOpenStartRange()
 	case "{":
 		return p.parseMapNode()
 	case "?":
@@ -668,12 +688,14 @@ func (p *Parser) parseBracketOrRange() (Node, error) {
 	}
 	if p.CurrentToken().Kind == ".." {
 		p.scanner.Next()
+		p.inRangeEnd = true
 		d, err := p.expression()
+		p.inRangeEnd = false
 		if err != nil {
 			return nil, err
 		}
 
-		if p.CurrentToken().Kind == ")" {
+		if p.CurrentToken().Kind == ")" || p.CurrentToken().Kind == "[" {
 			p.scanner.Next()
 			textRange.End = p.CurrentToken().Pos
 			return &RangeNode{StartOpen: true, Start: c, EndOpen: true, End: d, textRange: textRange}, nil
@@ -682,13 +704,39 @@ func (p *Parser) parseBracketOrRange() (Node, error) {
 			textRange.End = p.CurrentToken().Pos
 			return &RangeNode{StartOpen: true, Start: c, EndOpen: false, End: d, textRange: textRange}, nil
 		}
-		return nil, p.Unexpected(")", "]")
+		return nil, p.Unexpected(")", "]", "[")
 	} else if p.CurrentToken().Expect(")") {
 		p.scanner.Next()
 	} else {
 		return nil, p.Unexpected(")")
 	}
 	return c, nil
+}
+
+func (p *Parser) parseOpenStartRange() (Node, error) {
+	rng := p.startTextRange()
+	p.scanner.Next() // consume ']'
+	start, err := p.expression()
+	if err != nil {
+		return nil, err
+	}
+	if !p.CurrentToken().Expect("..") {
+		return nil, p.Unexpected("..")
+	}
+	p.scanner.Next()
+	p.inRangeEnd = true
+	end, err := p.expression()
+	p.inRangeEnd = false
+	if err != nil {
+		return nil, err
+	}
+	endOpen := p.CurrentToken().Expect(")", "[")
+	if !p.CurrentToken().Expect("]", ")", "[") {
+		return nil, p.Unexpected("]", ")", "[")
+	}
+	p.scanner.Next()
+	rng.End = p.CurrentToken().Pos
+	return &RangeNode{StartOpen: true, Start: start, EndOpen: endOpen, End: end, textRange: rng}, nil
 }
 
 func (p *Parser) parseRangeOrArray() (Node, error) {
@@ -713,13 +761,15 @@ func (p *Parser) parseRangeOrArray() (Node, error) {
 		return nil, p.Unexpected("..")
 	}
 	p.scanner.Next()
+	p.inRangeEnd = true
 	d, err := p.expression()
+	p.inRangeEnd = false
 	if err != nil {
 		return nil, err
 	}
 
 	startOpen := prefixKind == "("
-	if p.CurrentToken().Kind == ")" {
+	if p.CurrentToken().Kind == ")" || p.CurrentToken().Kind == "[" {
 		p.scanner.Next()
 		rng.End = p.CurrentToken().Pos
 		return &RangeNode{StartOpen: startOpen, Start: c, EndOpen: true, End: d, textRange: rng}, nil
@@ -728,7 +778,7 @@ func (p *Parser) parseRangeOrArray() (Node, error) {
 		rng.End = p.CurrentToken().Pos
 		return &RangeNode{StartOpen: startOpen, Start: c, EndOpen: false, End: d, textRange: rng}, nil
 	}
-	return nil, p.Unexpected(")", "]")
+	return nil, p.Unexpected(")", "]", "[")
 }
 
 func (p *Parser) parseArrayGivenFirst(prefixKind string, firstElem Node) (Node, error) {
