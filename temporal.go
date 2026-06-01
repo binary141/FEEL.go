@@ -34,9 +34,13 @@ func (st FEELTime) Time() time.Time {
 }
 
 var timePatterns = []string{
+	"15:04:05.999999999Z07:00:00",
+	"15:04:05.999999999Z07:00",
 	"15:04:05.999999999-07:00:00",
 	"15:04:05.999999999-07:00",
 	"15:04:05.999999999",
+	"15:04:05Z07:00:00",
+	"15:04:05Z07:00",
 	"15:04:05-07:00:00",
 	"15:04:05-07:00",
 	"15:04:05@MST",
@@ -238,13 +242,52 @@ func (sdt *FEELDatetime) Sub(v HasTime) *FEELDuration {
 }
 
 var dateTimePatterns = []string{
+	"2006-01-02T15:04:05.999999999Z07:00:00",
+	"2006-01-02T15:04:05.999999999Z07:00",
 	"2006-01-02T15:04:05.999999999-07:00:00",
 	"2006-01-02T15:04:05.999999999-07:00",
 	"2006-01-02T15:04:05.999999999",
+	"2006-01-02T15:04:05Z07:00:00",
+	"2006-01-02T15:04:05Z07:00",
 	"2006-01-02T15:04:05-07:00:00",
 	"2006-01-02T15:04:05-07:00",
 	"2006-01-02T15:04:05@MST",
 	"2006-01-02T15:04:05",
+}
+
+// largeYearDTRe matches datetime strings with 4-9 digit years (no timezone — used for IANA path).
+var largeYearDTRe = regexp.MustCompile(`^(\d{4,9})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$`)
+
+func parseLargeYearDatetime(s string, loc *time.Location) (time.Time, bool) {
+	m := largeYearDTRe.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, false
+	}
+	year, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day, _ := strconv.Atoi(m[3])
+	hour, _ := strconv.Atoi(m[4])
+	min, _ := strconv.Atoi(m[5])
+	sec, _ := strconv.Atoi(m[6])
+	if month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || min > 59 || sec > 59 {
+		return time.Time{}, false
+	}
+	nsec := 0
+	if m[7] != "" {
+		frac := m[7]
+		if len(frac) > 9 {
+			frac = frac[:9]
+		}
+		for len(frac) < 9 {
+			frac += "0"
+		}
+		nsec, _ = strconv.Atoi(frac)
+	}
+	t := time.Date(year, time.Month(month), day, hour, min, sec, nsec, loc)
+	if t.Year() != year || int(t.Month()) != month || t.Day() != day {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
@@ -274,6 +317,9 @@ func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 					if t, err := time.ParseInLocation(pat, dtPart, loc); err == nil {
 						return &FEELDatetime{t: t, src: temporalStr}, nil
 					}
+				}
+				if t, ok := parseLargeYearDatetime(dtPart, loc); ok {
+					return &FEELDatetime{t: t, src: temporalStr}, nil
 				}
 			}
 			return nil, ErrParseTemporal
@@ -548,9 +594,44 @@ func installDatetimeFunctions(prelude *Prelude) {
 		return ParseTime(frm)
 	}).Required("from"))
 
-	prelude.Bind("date and time", wrapTyped(func(frm string) (interface{}, error) {
-		return ParseDatetime(frm)
-	}).Required("from"))
+	prelude.Bind("date and time", NewNativeFunc(func(args map[string]any) (any, error) {
+		_, hasExtra := args["__extra"]
+		if hasExtra {
+			return Null, nil
+		}
+		fromVal, hasFrom := args["from"]
+		timeVal, hasTime := args["time"]
+		if !hasFrom {
+			return Null, nil
+		}
+		if _, isNull := fromVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		if !hasTime {
+			s, ok := fromVal.(string)
+			if !ok {
+				return Null, nil
+			}
+			dt, err := ParseDatetime(s)
+			if err != nil {
+				return Null, nil
+			}
+			return dt, nil
+		}
+		if _, isNull := timeVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		hasDate, ok1 := fromVal.(HasDate)
+		feelTime, ok2 := timeVal.(*FEELTime)
+		if !ok1 || !ok2 {
+			return Null, nil
+		}
+		d := hasDate.Date()
+		t := feelTime.t
+		combined := time.Date(d.Year(), d.Month(), d.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+		src := fmt.Sprintf("%d-%02d-%02dT%s", d.Year(), d.Month(), d.Day(), feelTime.src)
+		return &FEELDatetime{t: combined, src: src}, nil
+	}).Optional("from", "time").Vararg("__extra"))
 
 	prelude.Bind("duration", wrapTyped(func(frm string) (interface{}, error) {
 		return ParseDuration(frm)

@@ -246,6 +246,17 @@ func TestEvalPairs(t *testing.T) {
 
 		// string() — date/time/datetime
 		{`string(date("2018-12-10"))`, "2018-12-10", ""},
+		{`date and time("2017-12-31T24:00:01")`, Null, ""},
+		{`date and time("2017-13-0T11:22:33")`, Null, ""},
+		{`date and time("998-12-31T11:22:33")`, Null, ""},
+		{`string(date and time("999999999-12-31T23:59:59.999999999@Europe/Paris"))`, "999999999-12-31T23:59:59.999999999@Europe/Paris", ""},
+		{`date and time("9999999999-12-27T11:22:33")`, Null, ""},
+		{`date and time("2017-12-31T11:22:33Z")`, MustParseDatetime("2017-12-31T11:22:33Z"), ""},
+		{`date and time("2017-12-31T7:20")`, Null, ""},
+		{`date and time("2017-12-31T13:20:00+5")`, Null, ""},
+		{`date and time(date and time("2017-09-05T10:20:00+02:00"),time("09:15:30.123456Z"))`, MustParseDatetime("2017-09-05T09:15:30.123456Z"), ""},
+		{`date and time(date and time("2017-09-05T10:20:00@Europe/Paris"),time("09:15:30.123456Z"))`, MustParseDatetime("2017-09-05T09:15:30.123456Z"), ""},
+
 		{`string(date and time("2018-12-10"))`, "2018-12-10T00:00:00", ""},
 		{`string(date and time("2018-12-10T10:30:00.0001"))`, "2018-12-10T10:30:00.0001", ""},
 		{`string(date and time("2018-12-10T10:30:00.0001+05:00:01"))`, "2018-12-10T10:30:00.0001+05:00:01", ""},
