@@ -519,7 +519,7 @@ func (node FunCall) EvalNativeFun(intp *Interpreter, funDef *NativeFun) (any, er
 			if v, ok := kwArgMap[argName]; ok {
 				argVals[argName] = v
 			} else {
-				return nil, NewErrKeywordArgument(argName)
+				return Null, nil
 			}
 		}
 		for _, argName := range funDef.optionalArgNames {
@@ -540,11 +540,16 @@ func (node FunCall) EvalNativeFun(intp *Interpreter, funDef *NativeFun) (any, er
 					}
 				}
 			}
+		} else {
+			for k := range kwArgMap {
+				if !knownKwArgs[k] {
+					return Null, nil
+				}
+			}
 		}
 	} else {
 		if len(node.Args) < len(funDef.requiredArgNames) {
-			required := funDef.requiredArgNames[len(node.Args):len(funDef.requiredArgNames)]
-			return nil, NewErrTooFewArguments(required)
+			return Null, nil
 		}
 		for i, argNode := range node.Args {
 			a, err := argNode.arg.Eval(intp)
