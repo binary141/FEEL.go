@@ -1094,6 +1094,16 @@ func installBuiltinFunctions(prelude *Prelude) {
 			Prefix    string `json:"prefix,omitempty"`
 			Suffix    string `json:"suffix,omitempty"`
 		}
+		if _, ok := kwargs["list"].([]any); !ok {
+			return Null, nil
+		}
+		if d, exists := kwargs["delimiter"]; exists {
+			if _, ok := d.(string); !ok {
+				if _, isNull := d.(*NullValue); !isNull {
+					return Null, nil
+				}
+			}
+		}
 		args := joinArgs{}
 		if err := decodeKWArgs(kwargs, &args); err != nil {
 			return nil, err

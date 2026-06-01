@@ -319,6 +319,11 @@ func TestEvalPairs(t *testing.T) {
 
 		{`string join(["hello", "world"])`, "helloworld", ""},
 		{`string join(["hello", "world"], " ", "[", "]")`, "[hello world]", ""},
+		{`string join(123, "X")`, Null, ""},
+		{`string join(["A", "b", "c"], ["d"])`, Null, ""},
+		{`string join(["A", "b", "c"])`, "Abc", ""},
+		{`string join("A", "b", "c")`, Null, ""},
+		{`string join(["A"])`, "A", ""},
 
 		{`or([false, 0, true, false, 1])`, true, ""},
 		{`and([false, 0, true, false, 1])`, false, ""},
