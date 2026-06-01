@@ -501,7 +501,7 @@ func (node FunCall) Eval(intp *Interpreter) (any, error) {
 	case *Macro:
 		return node.EvalMacro(intp, r)
 	default:
-		return nil, NewErrTypeMismatch("function")
+		return Null, nil
 	}
 }
 

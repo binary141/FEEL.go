@@ -343,6 +343,7 @@ func TestEvalPairs(t *testing.T) {
 		{`or([false, 0, true, false, 1])`, true, ""},
 		{`and([false, 0, true, false, 1])`, false, ""},
 		{`and([true, 1, true, "ok"])`, true, ""},
+		{`does not exist(1, 2)`, Null, ""},
 
 		// context/map functions
 		{`get value({a: 2}, "b")`, Null, ""},
