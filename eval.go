@@ -569,8 +569,7 @@ func (node FunCall) EvalNativeFun(intp *Interpreter, funDef *NativeFun) (any, er
 					argVals[funDef.varArgName] = []any{a}
 				}
 			} else {
-				//return nil, NewEvalError(-5002, "too many arguments")
-				return nil, NewErrTooManyArguments()
+				return Null, nil
 			}
 		}
 	}

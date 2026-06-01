@@ -143,7 +143,7 @@ func installContextFunctions(prelude *Prelude) {
 		if err := decodeKWArgs(kwargs, &argsByKey); err != nil {
 			argsByKeys := putByKeys{}
 			if err := decodeKWArgs(kwargs, &argsByKeys); err != nil {
-				return nil, err
+				return Null, nil
 			}
 			ctx, _ := contextPutKeys(argsByKeys.Context, argsByKeys.Keys, argsByKeys.Value)
 			return ctx, nil
