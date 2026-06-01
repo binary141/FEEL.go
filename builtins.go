@@ -1084,10 +1084,10 @@ func installBuiltinFunctions(prelude *Prelude) {
 		type joinArgs struct {
 			List      []any  `json:"list"`
 			Delimiter string `json:"delimiter,omitempty"`
-			Prefix    string `json:"prefix,omitempty"`
-			Suffix    string `json:"suffix,omitempty"`
 		}
-		if _, ok := kwargs["list"].([]any); !ok {
+		if s, ok := kwargs["list"].(string); ok {
+			kwargs["list"] = []any{s}
+		} else if _, ok := kwargs["list"].([]any); !ok {
 			return Null, nil
 		}
 		if d, exists := kwargs["delimiter"]; exists {
@@ -1109,8 +1109,7 @@ func installBuiltinFunctions(prelude *Prelude) {
 				return Null, nil
 			}
 		}
-		joined := fmt.Sprintf("%s%s%s", args.Prefix, strings.Join(strArray, args.Delimiter), args.Suffix)
-		return joined, nil
-	}).Required("list").Optional("delimiter", "prefix", "suffix"))
+		return strings.Join(strArray, args.Delimiter), nil
+	}).Required("list").Optional("delimiter"))
 
 }
