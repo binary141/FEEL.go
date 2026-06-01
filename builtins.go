@@ -1091,10 +1091,10 @@ func installBuiltinFunctions(prelude *Prelude) {
 			return Null, nil
 		}
 		if d, exists := kwargs["delimiter"]; exists {
-			if _, ok := d.(string); !ok {
-				if _, isNull := d.(*NullValue); !isNull {
-					return Null, nil
-				}
+			if _, isNull := d.(*NullValue); isNull {
+				delete(kwargs, "delimiter")
+			} else if _, ok := d.(string); !ok {
+				return Null, nil
 			}
 		}
 		args := joinArgs{}

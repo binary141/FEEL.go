@@ -328,6 +328,7 @@ func TestEvalPairs(t *testing.T) {
 		{`string join(["A", "b", "c"])`, "Abc", ""},
 		{`string join("A", "b", "c")`, Null, ""},
 		{`string join(["A"])`, "A", ""},
+		{`string join(["a","b","c"], null)`, "abc", ""},
 		{`string join()`, Null, ""},
 		{`string join(list: ["a","c"], delimiter: "X")`, "aXc", ""},
 		{`string join(lst: ["a","c"], delimiter: "X")`, Null, ""},
