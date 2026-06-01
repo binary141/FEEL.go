@@ -395,7 +395,7 @@ func (dur FEELDuration) String() string {
 	}
 	// day-time duration
 	if dur.Days == 0 && dur.Hours == 0 && dur.Minutes == 0 && dur.Seconds == 0 && dur.SecondsFrac == "" {
-		return neg + "PT0S"
+		return neg + "P0D"
 	}
 	sDay, sTime := "", ""
 	if dur.Days != 0 {
@@ -421,7 +421,7 @@ var yearmonthDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)Y)?((\d+)M)?$`)
 // groups: [1]=neg [2]=dayspart [3]=daysval [4]=timepart [5]=hourspart [6]=hoursval
 //
 //	[7]=minspart [8]=minsval [9]=secspart [10]=secsval [11]=secsfrac
-var timeDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)D)?(T((\d+)H)?((\d+)M)?((\d+)(\.\d+)?S)?)?$`)
+var timeDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)D)?(T((\d+)H)?((\d+)M)?((\d+)(\.\d*)?S)?)?$`)
 
 func ParseDuration(temporalStr string) (*FEELDuration, error) {
 	// parse year-month duration
@@ -486,7 +486,11 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 				return nil, err
 			}
 			dur.Seconds = int(v)
-			dur.SecondsFrac = submatches[11] // ".1234" or ""
+			frac := submatches[11]
+		if frac == "." {
+			frac = ""
+		}
+		dur.SecondsFrac = frac // ".1234" or ""
 		}
 		return dur, nil
 	}

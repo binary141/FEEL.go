@@ -205,6 +205,16 @@ func TestEvalPairs(t *testing.T) {
 		{`years and months duration(from:date("2011-12-22"),to:date("2013-08-24"))`, MustParseDuration("P1Y8M"), ""},
 		{`years and months duration(from:date("2016-01-21"),to:date("2015-01-21"))`, MustParseDuration("-P1Y"), ""},
 
+		// duration function
+		{`duration("PT0.S")`, MustParseDuration("P0D"), ""},
+		{`duration(null)`, Null, ""},
+		{`duration("P1H")`, Null, ""},
+		{`duration("")`, Null, ""},
+		{`duration("P0")`, Null, ""},
+		{`duration([])`, Null, ""},
+		{`duration("1Y")`, Null, ""},
+		{`duration(2017)`, Null, ""},
+
 		// builtin functions
 		{`is defined(x)`, false, ""},
 		{`is defined(x[5])`, false, "{x: [1, 2, 3]}"},
@@ -247,7 +257,7 @@ func TestEvalPairs(t *testing.T) {
 		// string() — duration
 		{`string(duration("P1D"))`, "P1D", ""},
 		{`string(duration("-P1D"))`, "-P1D", ""},
-		{`string(duration("P0D"))`, "PT0S", ""},
+		{`string(duration("P0D"))`, "P0D", ""},
 		{`string(duration("P1DT2H3M4.1234S"))`, "P1DT2H3M4.1234S", ""},
 		{`string(duration("PT49H"))`, "P2DT1H", ""},
 		{`string(duration("P1Y"))`, "P1Y", ""},

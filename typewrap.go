@@ -127,8 +127,7 @@ func wrapTyped(tfunc interface{}) *NativeFun {
 
 			argValue, err := interfaceToValue(param, argType)
 			if err != nil {
-				return nil, errors.New(
-					fmt.Sprintf("arguments %d %s", i+1, err))
+				return Null, nil
 			}
 			fnArgs = append(fnArgs, argValue)
 
@@ -139,11 +138,7 @@ func wrapTyped(tfunc interface{}) *NativeFun {
 		resType := funcType.Out(0)
 		errRes := resValues[1].Interface()
 		if errRes != nil {
-			if err, ok := errRes.(error); ok {
-				return nil, err
-			} else {
-				return nil, errors.New(fmt.Sprintf("error return is not error %+v", errRes))
-			}
+			return Null, nil
 		}
 
 		res, err := valueToInterface(
