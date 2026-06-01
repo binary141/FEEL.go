@@ -268,7 +268,16 @@ func TestEvalPairs(t *testing.T) {
 		{`not({a: 1})`, false, ""},
 
 		// list functions
+		{`mean([1, 2, 3])`, N(2), ""},
+		{`mean(null)`, Null, ""},
+		{`mean([1, null, 3])`, Null, ""},
+
 		{`median([3, 5, 9, 1, "hello", -2])`, N(3), ""},
+
+		{`sublist(["a","b","c"], 1, 2)`, []any{"a", "b"}, ""},
+		{`sublist(["a","b","c"], -1, 1)`, []any{"c"}, ""},
+		{`sublist(["a","b","c"], -2, 2)`, []any{"b", "c"}, ""},
+		{`sublist(["a","b","c"], -1)`, []any{"c"}, ""},
 
 		{`append(["hello"], " ", "world")`, []any{"hello", " ", "world"}, ""},
 		{`concatenate([2, 1], [3])`, []any{N(2), N(1), N(3)}, ""},

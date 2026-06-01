@@ -505,10 +505,19 @@ func installBuiltinFunctions(prelude *Prelude) {
 		sum := Zero
 		cnt := 0
 		for _, entry := range list {
+			if entry == nil {
+				return Null, nil
+			}
+			if _, isNull := entry.(*NullValue); isNull {
+				return Null, nil
+			}
 			if numEntry, ok := entry.(*Number); ok {
 				sum = sum.Add(numEntry)
 				cnt++
 			}
+		}
+		if cnt == 0 {
+			return Null, nil
 		}
 		r := sum.FloatDiv(N(cnt))
 		return r, nil
@@ -638,8 +647,12 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err := decodeKWArgs(kwargs, &args); err != nil {
 			return nil, err
 		}
-		startPos := fromFEELIndex(args.StartPos.Int())
-		if startPos >= len(args.List) {
+		startIdx := args.StartPos.Int()
+		if startIdx < 0 {
+			startIdx = len(args.List) + startIdx + 1
+		}
+		startPos := fromFEELIndex(startIdx)
+		if startPos < 0 || startPos >= len(args.List) {
 			return "", nil
 		}
 		endPos := len(args.List)
