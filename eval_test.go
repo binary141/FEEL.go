@@ -750,3 +750,46 @@ func TestLoanPayment(t *testing.T) {
 	assert.Assert(t, ok, "expected *Number result")
 	assert.Equal(t, n.v.Text('f', 11), "2778.69354943277")
 }
+
+func TestVacationDays(t *testing.T) {
+	type vacationCase struct {
+		age            int
+		yearsOfService int
+		case1          any
+		case2          any
+		case3          any
+		totalExpr      string
+		total          any
+	}
+	cases := []vacationCase{
+		{35, 10, N(0), N(0), N(0), "22 + max(0,0) + 0", N(22)},
+		{50, 20, N(0), N(0), N(2), "22 + max(0,2) + 0", N(24)},
+		{65, 10, N(5), N(3), N(2), "22 + max(5,2) + 3", N(30)},
+		{40, 35, N(5), N(3), N(0), "22 + max(5,0) + 3", N(30)},
+		{17, 1, N(5), N(0), N(0), "22 + max(5,0) + 0", N(27)},
+	}
+
+	for _, c := range cases {
+		ctx := fmt.Sprintf(`{"Age": %d, "Years of Service": %d}`, c.age, c.yearsOfService)
+
+		base, err := EvalString("22", ctx)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, N(22), base)
+
+		case1, err := EvalString("if Age < 18 or Age >= 60 or Years of Service >= 30 then 5 else 0", ctx)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, c.case1, case1)
+
+		case2, err := EvalString("if Age >= 60 or Years of Service >= 30 then 3 else 0", ctx)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, c.case2, case2)
+
+		case3, err := EvalString("if Age >= 45 and Years of Service >= 10 then 2 else 0", ctx)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, c.case3, case3)
+
+		total, err := EvalString(c.totalExpr, ctx)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, c.total, total)
+	}
+}
