@@ -415,6 +415,27 @@ func TestEvalPairs(t *testing.T) {
 		{`sort(["hello", "a", "world"], function(x, y) x < y)`, []any{"a", "hello", "world"}, ""},
 		{`sort([8, -1, 3], function(x, y) x > y)`, []any{N(8), N(3), N(-1)}, ""},
 
+		// list functions with variables
+		{`list contains(list1, list2)`, false, `{list1: ["apple","banana","cherry"], list2: ["banana","date","fig"]}`},
+		{`list contains(list2, string1)`, true, `{list2: ["banana","date","fig"], string1: "date"}`},
+		{`count(list1)`, N(3), `{list1: ["apple","banana","cherry"]}`},
+		{`min(numList)`, N(10), `{numList: [10,20,30,40]}`},
+		{`sum(numList)`, N(100), `{numList: [10,20,30,40]}`},
+		{`mean(numList)`, N(25), `{numList: [10,20,30,40]}`},
+		{`mean(num1, num2, num3)`, N(60), `{num1: 50, num2: 60, num3: 70}`},
+		{`sublist(list1, 1, 2)`, []any{"apple", "banana"}, `{list1: ["apple","banana","cherry"]}`},
+		{`sublist(list1, -1, 1)`, []any{"cherry"}, `{list1: ["apple","banana","cherry"]}`},
+		{`append(numList, num1, num2)`, []any{N(10), N(20), N(30), N(40), N(50), N(60)}, `{numList: [10,20,30,40], num1: 50, num2: 60}`},
+		{`concatenate(list1, list2)`, []any{"apple", "banana", "cherry", "banana", "date", "fig"}, `{list1: ["apple","banana","cherry"], list2: ["banana","date","fig"]}`},
+		{`insert before(list2, 2, string1)`, []any{"banana", "date", "date", "fig"}, `{list2: ["banana","date","fig"], string1: "date"}`},
+		{`remove(list2, 2)`, []any{"banana", "fig"}, `{list2: ["banana","date","fig"]}`},
+		{`append(list1, string1)`, []any{"apple", "banana", "cherry", "date"}, `{list1: ["apple","banana","cherry"], string1: "date"}`},
+		{`index of(list2, string1)`, []any{N(2)}, `{list2: ["banana","date","fig"], string1: "date"}`},
+		{`flatten(append(list1, list2))`, []any{"apple", "banana", "cherry", "banana", "date", "fig"}, `{list1: ["apple","banana","cherry"], list2: ["banana","date","fig"]}`},
+		{`reverse(concatenate1)`, []any{"fig", "date", "banana", "cherry", "banana", "apple"}, `{concatenate1: ["apple","banana","cherry","banana","date","fig"]}`},
+		{`union(insertBefore1, concatenate1)`, []any{"banana", "date", "fig", "apple", "cherry"}, `{insertBefore1: ["banana","date","date","fig"], concatenate1: ["apple","banana","cherry","banana","date","fig"]}`},
+		{`distinct values(insertBefore1)`, []any{"banana", "date", "fig"}, `{insertBefore1: ["banana","date","date","fig"]}`},
+
 		// list replace
 		{`list replace([1,2,3], 2, 4)`, []any{N(1), N(4), N(3)}, ""},
 		{`list replace([1,2,3], -1, 4)`, []any{N(1), N(2), N(4)}, ""},
