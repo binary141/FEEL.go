@@ -778,25 +778,28 @@ func installBuiltinFunctions(prelude *Prelude) {
 
 	prelude.Bind("union", NewNativeFunc(func(kwargs map[string]any) (any, error) {
 		type unionArgs struct {
-			Lists [][]any `json:"lists"`
+			Lists []any `json:"lists"`
 		}
 		args := unionArgs{}
 		if err := decodeKWArgs(kwargs, &args); err != nil {
 			return nil, err
 		}
+		addElem := func(elemSet []any, elem any) []any {
+			for _, setElem := range elemSet {
+				if cmp, err := compareInterfaces(elem, setElem); err == nil && cmp == 0 {
+					return elemSet
+				}
+			}
+			return append(elemSet, elem)
+		}
 		elemSet := make([]any, 0)
-		for _, list := range args.Lists {
-			for _, elem := range list {
-				found := false
-				for _, setElem := range elemSet {
-					if cmp, err := compareInterfaces(elem, setElem); err == nil && cmp == 0 {
-						found = true
-						break
-					}
+		for _, arg := range args.Lists {
+			if list, ok := arg.([]any); ok {
+				for _, elem := range list {
+					elemSet = addElem(elemSet, elem)
 				}
-				if !found {
-					elemSet = append(elemSet, elem)
-				}
+			} else {
+				elemSet = addElem(elemSet, arg)
 			}
 		}
 		return elemSet, nil

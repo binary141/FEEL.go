@@ -411,6 +411,7 @@ func TestEvalPairs(t *testing.T) {
 		{`flatten([["a","b","c"],["w","x","y","z"]])`, []any{"a", "b", "c", "w", "x", "y", "z"}, ""},
 		{`flatten([["a"], [["b", ["c"]]], ["d"]])`, []any{"a", "b", "c", "d"}, ""},
 		{`union(["a", "b"], ["b", "c"], ["d"])`, []any{"a", "b", "c", "d"}, ""},
+		{`union(["a", "b"], null)`, []any{"a", "b", Null}, ""},
 
 		{`sort(["hello", "a", "world"], function(x, y) x < y)`, []any{"a", "hello", "world"}, ""},
 		{`sort([8, -1, 3], function(x, y) x > y)`, []any{N(8), N(3), N(-1)}, ""},
