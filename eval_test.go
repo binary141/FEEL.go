@@ -366,6 +366,25 @@ func TestEvalPairs(t *testing.T) {
 		{`not({})`, true, ""},
 		{`not({a: 1})`, false, ""},
 
+		// string functions — context: A="banana", B="AN", NumC=3
+		{`starts with(A, "x")`, false, `{A: "banana"}`},
+		{`starts with(A, B)`, false, `{A: "banana", B: "AN"}`},
+		{`ends with(A, "x")`, false, `{A: "banana"}`},
+		{`ends with(A, B)`, false, `{A: "banana", B: "AN"}`},
+		{`contains(A, "x")`, false, `{A: "banana"}`},
+		{`contains(A, B)`, false, `{A: "banana", B: "AN"}`},
+		{`substring(A, NumC, 1)`, "n", `{A: "banana", NumC: 3}`},
+		{`string length(A)`, N(6), `{A: "banana"}`},
+		{`upper case(A)`, "BANANA", `{A: "banana"}`},
+		{`lower case(B)`, "an", `{B: "AN"}`},
+		{`substring before(A, B)`, "", `{A: "banana", B: "AN"}`},
+		{`substring after(A, B)`, "", `{A: "banana", B: "AN"}`},
+		{`matches(A, "[a-z]{3}")`, true, `{A: "banana"}`},
+		{`replace(A, "a", "o")`, "bonono", `{A: "banana"}`},
+		{`replace(A, "(an)+", "**")`, "b**a", `{A: "banana"}`},
+		{`replace(A, "[aeiouy]", "[$0]")`, "b[a]n[a]n[a]", `{A: "banana"}`},
+		{`string(NumC)`, "3", `{NumC: 3}`},
+
 		// list functions
 		{`mean([1, 2, 3])`, N(2), ""},
 		{`mean(null)`, Null, ""},

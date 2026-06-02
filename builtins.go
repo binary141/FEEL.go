@@ -6,6 +6,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"math"
 	"math/big"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -409,6 +410,38 @@ func installBuiltinFunctions(prelude *Prelude) {
 	prelude.Bind("ends with", wrapTyped(func(s string, match string) (bool, error) {
 		return strings.HasSuffix(s, match), nil
 	}).Required("string", "match"))
+
+	prelude.Bind("substring before", wrapTyped(func(s string, match string) (string, error) {
+		idx := strings.Index(s, match)
+		if idx < 0 {
+			return "", nil
+		}
+		return s[:idx], nil
+	}).Required("string", "match"))
+
+	prelude.Bind("substring after", wrapTyped(func(s string, match string) (string, error) {
+		idx := strings.Index(s, match)
+		if idx < 0 {
+			return "", nil
+		}
+		return s[idx+len(match):], nil
+	}).Required("string", "match"))
+
+	prelude.Bind("matches", wrapTyped(func(s string, pattern string) (bool, error) {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return false, nil
+		}
+		return re.MatchString(s), nil
+	}).Required("input", "pattern"))
+
+	prelude.Bind("replace", wrapTyped(func(s string, pattern string, replacement string) (string, error) {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return "", nil
+		}
+		return re.ReplaceAllString(s, replacement), nil
+	}).Required("input", "pattern", "replacement"))
 
 	// list functions
 	prelude.Bind("list contains", wrapTyped(func(list []any, elem any) (bool, error) {
