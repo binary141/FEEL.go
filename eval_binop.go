@@ -398,16 +398,22 @@ func (binop Binop) andOp(intp *Interpreter) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	leftBool := boolValue(leftVal)
-	if !leftBool {
+	_, leftNull := leftVal.(*NullValue)
+	if !leftNull && !boolValue(leftVal) {
 		return false, nil
 	}
 	rightVal, err := binop.Right.Eval(intp)
 	if err != nil {
 		return nil, err
 	}
-	rightBool := boolValue(rightVal)
-	return rightBool, nil
+	_, rightNull := rightVal.(*NullValue)
+	if !rightNull && !boolValue(rightVal) {
+		return false, nil
+	}
+	if leftNull || rightNull {
+		return Null, nil
+	}
+	return true, nil
 }
 
 func (binop Binop) orOp(intp *Interpreter) (any, error) {
@@ -415,16 +421,22 @@ func (binop Binop) orOp(intp *Interpreter) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	leftBool := boolValue(leftVal)
-	if leftBool {
+	_, leftNull := leftVal.(*NullValue)
+	if !leftNull && boolValue(leftVal) {
 		return true, nil
 	}
 	rightVal, err := binop.Right.Eval(intp)
 	if err != nil {
 		return nil, err
 	}
-	rightBool := boolValue(rightVal)
-	return rightBool, nil
+	_, rightNull := rightVal.(*NullValue)
+	if !rightNull && boolValue(rightVal) {
+		return true, nil
+	}
+	if leftNull || rightNull {
+		return Null, nil
+	}
+	return false, nil
 }
 
 func (binop Binop) indexAtOp(intp *Interpreter) (any, error) {

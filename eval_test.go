@@ -22,6 +22,44 @@ func TestEvalPairs(t *testing.T) {
 
 		{"5 + -6", N(-1), ""},
 		{"5 + 6", N(11), ""},
+
+		// arithmetic: addition
+		{"10+5", N(15), ""},
+		{"-10+-5", N(-15), ""},
+		{"(-10)+(-5)", N(-15), ""},
+
+		// arithmetic: subtraction
+		{"10-5", N(5), ""},
+		{"-10--5", N(-5), ""},
+		{"(-10)-(-5)", N(-5), ""},
+		{"(10+20)-(-5+3)", N(32), ""},
+
+		// arithmetic: multiplication
+		{"10*5", N(50), ""},
+		{"-10*-5", N(50), ""},
+		{"(-10)*(-5)", N(50), ""},
+		{"(10+5)*(-5*3)", N(-225), ""},
+
+		// arithmetic: division
+		{"10/5", N(2), ""},
+		{"-10/-5", N(2), ""},
+		{"(-10)/(-5)", N(2), ""},
+		{"(10+20)/(-5*3)", N(-2), ""},
+		{"(10+20)/0", Null, ""},
+
+		// arithmetic: exponentiation
+		{"10**5", N(100000), ""},
+		{"10**-5", N("0.00001"), ""},
+		{"(5+2)**5", N(16807), ""},
+		{"5+2**5", N(37), ""},
+		{"5+2**5+3", N(40), ""},
+		{"5+2**(5+3)", N(261), ""},
+
+		// arithmetic: precedence
+		{"10 + 20 / -5 - 3", N(3), ""},
+		{"10 + 20 / (-5 - 3)", N("7.5"), ""},
+		{"1.2*10**3", N(1200), ""},
+
 		{"(function(a) 2 * a)(5)", N(10), ""},
 		{"true", true, ""},
 		{"false", false, ""},
@@ -33,8 +71,13 @@ func TestEvalPairs(t *testing.T) {
 
 		// null arithmetic
 		{`10+null`, Null, ""},
+		{`null + 10`, Null, ""},
+		{`10 - null`, Null, ""},
 		{`null - 10`, Null, ""},
+		{`10 * null`, Null, ""},
 		{`null * 10`, Null, ""},
+		{`10 / null`, Null, ""},
+		{`null / 10`, Null, ""},
 
 		{`{a if c: "hello", b: "world"}`, map[string]any{"a if c": "hello", "b": "world"}, ""},
 
@@ -67,6 +110,28 @@ func TestEvalPairs(t *testing.T) {
 		{`2 ** 10`, N(1024), ""},
 		{`"foo" ** 4`, Null, ""},
 		{`true ** 4`, Null, ""},
+
+		// boolean: and (three-valued logic)
+		{`true and true`, true, ""},
+		{`true and false`, false, ""},
+		{`true and null`, Null, ""},
+		{`false and true`, false, ""},
+		{`false and false`, false, ""},
+		{`false and null`, false, ""},
+		{`null and true`, Null, ""},
+		{`null and false`, false, ""},
+		{`null and null`, Null, ""},
+
+		// boolean: or (three-valued logic)
+		{`true or true`, true, ""},
+		{`true or false`, true, ""},
+		{`true or null`, true, ""},
+		{`false or true`, true, ""},
+		{`false or false`, false, ""},
+		{`false or null`, Null, ""},
+		{`null or true`, true, ""},
+		{`null or false`, Null, ""},
+		{`null or null`, Null, ""},
 
 		// null check
 		{`a != null and a.b > 10`, false, ""},
