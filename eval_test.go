@@ -405,6 +405,10 @@ func TestEvalPairs(t *testing.T) {
 		{`index of([1,2,3,2],2)`, []any{N(2), N(4)}, ""},
 
 		{`distinct values([1, 2, 1, 2, 3, 2, 1])`, []any{N(1), N(2), N(3)}, ""},
+		{`["a","b","c"]`, []any{"a", "b", "c"}, ""},
+		{`COLLECT("a","b","c")`, []any{"a", "b", "c"}, ""},
+		{`flatten([["w","x"],"y","z"])`, []any{"w", "x", "y", "z"}, ""},
+		{`flatten([["a","b","c"],["w","x","y","z"]])`, []any{"a", "b", "c", "w", "x", "y", "z"}, ""},
 		{`flatten([["a"], [["b", ["c"]]], ["d"]])`, []any{"a", "b", "c", "d"}, ""},
 		{`union(["a", "b"], ["b", "c"], ["d"])`, []any{"a", "b", "c", "d"}, ""},
 

@@ -704,6 +704,15 @@ func installBuiltinFunctions(prelude *Prelude) {
 		return append(args.List, args.Items...), nil
 	}).Required("list").Vararg("items"))
 
+	prelude.Bind("COLLECT", NewNativeFunc(func(args map[string]any) (any, error) {
+		if v, ok := args["items"]; ok {
+			if listV, ok := v.([]any); ok {
+				return listV, nil
+			}
+		}
+		return []any{}, nil
+	}).Vararg("items"))
+
 	prelude.Bind("concatenate", NewNativeFunc(func(kwargs map[string]any) (any, error) {
 		type concatArgs struct {
 			Lists [][]any `json:"lists"`
