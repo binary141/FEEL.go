@@ -58,6 +58,12 @@ func (binop Binop) numberOp(intp *Interpreter, en evalNumbers, op string) (any, 
 	if err != nil {
 		return nil, err
 	}
+	if _, ok := leftVal.(*NullValue); ok {
+		return Null, nil
+	}
+	if _, ok := rightVal.(*NullValue); ok {
+		return Null, nil
+	}
 	if leftNumber, ok := leftVal.(*Number); ok {
 		if rightNumber, ok := rightVal.(*Number); ok {
 			return en(leftNumber, rightNumber), nil
@@ -220,6 +226,12 @@ func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op
 	rightVal, err := binop.Right.Eval(intp)
 	if err != nil {
 		return nil, err
+	}
+	if _, ok := leftVal.(*NullValue); ok {
+		return Null, nil
+	}
+	if _, ok := rightVal.(*NullValue); ok {
+		return Null, nil
 	}
 
 	switch v := leftVal.(type) {

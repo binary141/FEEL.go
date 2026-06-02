@@ -27,6 +27,15 @@ func TestEvalPairs(t *testing.T) {
 		{"false", false, ""},
 		{`"hello" + " world"`, "hello world", ""},
 
+		// constants
+		{`.872`, N(".872"), ""},
+		{`-.872`, N("-.872"), ""},
+
+		// null arithmetic
+		{`10+null`, Null, ""},
+		{`null - 10`, Null, ""},
+		{`null * 10`, Null, ""},
+
 		{`{a if c: "hello", b: "world"}`, map[string]any{"a if c": "hello", "b": "world"}, ""},
 
 		// in range and array

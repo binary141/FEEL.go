@@ -46,7 +46,7 @@ var tokenMatchers = []tokenMatcher{
 
 	match(TokenTemporal, `@"(\\.|[^"])*"`),
 	match(TokenString, `"(\\.|[^"])*"`),
-	match(TokenNumber, `\-?[0-9]+(\.[0-9]+)?\b`),
+	match(TokenNumber, `\-?([0-9]+(\.[0-9]+)?|\.[0-9]+)\b`),
 
 	match("?", ""),
 	match("..", ""),
