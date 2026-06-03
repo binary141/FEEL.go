@@ -61,6 +61,7 @@ func TestEvalPairs(t *testing.T) {
 		{"1.2*10**3", N(1200), ""},
 
 		{"(function(a) 2 * a)(5)", N(10), ""},
+		{`string({PMT: function(p, r, n) (p*r/12)/(1-(1+r/12)**-n), result: PMT(600000, 0.0375, 360)}.result)`, "2778.693549432766768089", ""},
 		{"true", true, ""},
 		{"false", false, ""},
 		{`"hello" + " world"`, "hello world", ""},

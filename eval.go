@@ -330,13 +330,15 @@ func (node MultiTests) Eval(intp *Interpreter) (any, error) {
 
 func (node MapNode) Eval(intp *Interpreter) (any, error) {
 	mapVal := make(map[string]any)
+	intp.PushEmpty()
+	defer intp.Pop()
 	for _, item := range node.Values {
-
 		v, err := item.Value.Eval(intp)
 		if err != nil {
 			return nil, err
 		}
 		mapVal[item.Name] = v
+		intp.Bind(item.Name, v)
 	}
 	return mapVal, nil
 }
