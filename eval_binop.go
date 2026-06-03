@@ -457,8 +457,25 @@ func (binop Binop) indexAtOp(intp *Interpreter) (any, error) {
 			}
 			return v[at-1], nil
 		} else {
-			//return nil, NewEvalError(-3200, "non int index")
-			return nil, NewErrIndex("non int index")
+			// filter expression: re-evaluate right side per element with element context
+			var result []any
+			for _, elem := range v {
+				if mapElem, ok := elem.(map[string]any); ok {
+					intp.Push(mapElem)
+					r, err := binop.Right.Eval(intp)
+					intp.Pop()
+					if err != nil {
+						continue
+					}
+					if boolValue(r) {
+						result = append(result, elem)
+					}
+				}
+			}
+			if result == nil {
+				return []any{}, nil
+			}
+			return result, nil
 		}
 	case map[string]any:
 		if strRight, ok := rightVal.(string); ok {

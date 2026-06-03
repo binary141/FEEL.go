@@ -346,7 +346,20 @@ func (node DotOp) Eval(intp *Interpreter) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if mapVal, ok := leftVal.(map[string]any); ok {
+	if listVal, ok := leftVal.([]any); ok {
+		var result []any
+		for _, elem := range listVal {
+			if mapElem, ok := elem.(map[string]any); ok {
+				if val, found := mapElem[node.Attr]; found {
+					result = append(result, val)
+				}
+			}
+		}
+		if result == nil {
+			return []any{}, nil
+		}
+		return result, nil
+	} else if mapVal, ok := leftVal.(map[string]any); ok {
 		if val, found := mapVal[node.Attr]; found {
 			return val, nil
 		} else {

@@ -437,6 +437,9 @@ func TestEvalPairs(t *testing.T) {
 		{`union(insertBefore1, concatenate1)`, []any{"banana", "date", "fig", "apple", "cherry"}, `{insertBefore1: ["banana","date","date","fig"], concatenate1: ["apple","banana","cherry","banana","date","fig"]}`},
 		{`distinct values(insertBefore1)`, []any{"banana", "date", "fig"}, `{insertBefore1: ["banana","date","date","fig"]}`},
 
+		// path expression with filter
+		{`Employees[dept=20].name`, []any{"test"}, `{Employees: [{dept: 20, name: "test"}]}`},
+
 		// list replace
 		{`list replace([1,2,3], 2, 4)`, []any{N(1), N(4), N(3)}, ""},
 		{`list replace([1,2,3], -1, 4)`, []any{N(1), N(2), N(4)}, ""},
