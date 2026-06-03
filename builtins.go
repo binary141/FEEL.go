@@ -52,12 +52,7 @@ func extractList(args map[string]any, argName string) ([]any, error) {
 }
 
 func feelNumberString(n *Number) string {
-	s := n.String()
-	if strings.Contains(s, ".") {
-		s = strings.TrimRight(s, "0")
-		s = strings.TrimRight(s, ".")
-	}
-	return s
+	return n.String()
 }
 
 func feelContextKeyNeedsQuotes(k string) bool {

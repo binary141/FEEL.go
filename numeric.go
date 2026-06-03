@@ -6,6 +6,7 @@ package feel
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/cockroachdb/apd/v3"
 )
@@ -17,6 +18,14 @@ var decimal128Context = apd.Context{
 	MaxExponent: 6144,
 	MinExponent: -6143,
 	Traps:       apd.DefaultTraps,
+}
+
+// displayContext rounds to 15 significant digits for display/output.
+var displayContext = apd.Context{
+	Precision:   15,
+	Rounding:    apd.RoundHalfEven,
+	MaxExponent: 6144,
+	MinExponent: -6143,
 }
 
 var (
@@ -149,7 +158,14 @@ func (number Number) Compare(other Number) int {
 }
 
 func (number Number) String() string {
-	return number.v.Text('f')
+	rounded := new(apd.Decimal)
+	displayContext.Round(rounded, number.v) //nolint:errcheck
+	s := rounded.Text('f')
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
+	}
+	return s
 }
 
 func (number Number) MarshalJSON() ([]byte, error) {
