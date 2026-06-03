@@ -3,9 +3,9 @@ package feel
 import (
 	"errors"
 	"fmt"
+	"github.com/cockroachdb/apd/v3"
 	"github.com/mitchellh/mapstructure"
 	"math"
-	"math/big"
 	"regexp"
 	"sort"
 	"strings"
@@ -152,162 +152,23 @@ func feelItemString(v any) (string, error) {
 	return "null", nil
 }
 
-func roundCeiling(n *Number, scale int64) *Number {
+// quantize rounds n to the given decimal scale using the specified rounding mode.
+// scale >= 34 returns n unchanged (beyond Decimal 128 precision).
+func quantize(n *Number, scale int64, rounding apd.Rounder) *Number {
 	if scale >= 34 {
 		return n
 	}
-	rat, _ := n.v.Rat(nil)
-	absScale := scale
-	if absScale < 0 {
-		absScale = -absScale
-	}
-	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(absScale), nil)
-	factorRat := new(big.Rat).SetInt(factor)
-	shifted := new(big.Rat)
-	if scale >= 0 {
-		shifted.Mul(rat, factorRat)
-	} else {
-		shifted.Quo(rat, factorRat)
-	}
-	p := new(big.Int).Set(shifted.Num())
-	q := shifted.Denom()
-	t := new(big.Int)
-	r := new(big.Int)
-	t.QuoRem(p, q, r)
-	var ceiling *big.Int
-	if r.Sign() == 0 {
-		ceiling = t
-	} else if p.Sign() >= 0 {
-		ceiling = new(big.Int).Add(t, big.NewInt(1))
-	} else {
-		ceiling = new(big.Int).Sub(t, big.NewInt(1))
-	}
-	resultRat := new(big.Rat).SetInt(ceiling)
-	if scale >= 0 {
-		resultRat.Quo(resultRat, factorRat)
-	} else {
-		resultRat.Mul(resultRat, factorRat)
-	}
-	return &Number{v: new(big.Float).SetPrec(Prec).SetRat(resultRat)}
+	ctx := decimal128Context
+	ctx.Rounding = rounding
+	result := new(apd.Decimal)
+	ctx.Quantize(result, n.v, int32(-scale)) //nolint:errcheck
+	return &Number{v: result}
 }
 
-func roundDown(n *Number, scale int64) *Number {
-	if scale >= 34 {
-		return n
-	}
-	rat, _ := n.v.Rat(nil)
-	absScale := scale
-	if absScale < 0 {
-		absScale = -absScale
-	}
-	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(absScale), nil)
-	factorRat := new(big.Rat).SetInt(factor)
-	shifted := new(big.Rat)
-	if scale >= 0 {
-		shifted.Mul(rat, factorRat)
-	} else {
-		shifted.Quo(rat, factorRat)
-	}
-	p := new(big.Int).Set(shifted.Num())
-	q := shifted.Denom()
-	t := new(big.Int)
-	r := new(big.Int)
-	t.QuoRem(p, q, r)
-	floor := t
-	resultRat := new(big.Rat).SetInt(floor)
-	if scale >= 0 {
-		resultRat.Quo(resultRat, factorRat)
-	} else {
-		resultRat.Mul(resultRat, factorRat)
-	}
-	return &Number{v: new(big.Float).SetPrec(Prec).SetRat(resultRat)}
-}
-
-func roundHalfUp(n *Number, scale int64) *Number {
-	if scale >= 34 {
-		return n
-	}
-	rat, _ := n.v.Rat(nil)
-	absScale := scale
-	if absScale < 0 {
-		absScale = -absScale
-	}
-	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(absScale), nil)
-	factorRat := new(big.Rat).SetInt(factor)
-	shifted := new(big.Rat)
-	if scale >= 0 {
-		shifted.Mul(rat, factorRat)
-	} else {
-		shifted.Quo(rat, factorRat)
-	}
-	p := new(big.Int).Set(shifted.Num())
-	q := shifted.Denom()
-	t := new(big.Int)
-	r := new(big.Int)
-	t.QuoRem(p, q, r)
-	// 2*|r| >= q → round away from zero (ties go away from zero)
-	twoAbsR := new(big.Int).Mul(new(big.Int).Abs(r), big.NewInt(2))
-	var result *big.Int
-	if twoAbsR.Cmp(q) >= 0 {
-		if p.Sign() >= 0 {
-			result = new(big.Int).Add(t, big.NewInt(1))
-		} else {
-			result = new(big.Int).Sub(t, big.NewInt(1))
-		}
-	} else {
-		result = t
-	}
-	resultRat := new(big.Rat).SetInt(result)
-	if scale >= 0 {
-		resultRat.Quo(resultRat, factorRat)
-	} else {
-		resultRat.Mul(resultRat, factorRat)
-	}
-	return &Number{v: new(big.Float).SetPrec(Prec).SetRat(resultRat)}
-}
-
-func roundHalfDown(n *Number, scale int64) *Number {
-	if scale >= 34 {
-		return n
-	}
-	rat, _ := n.v.Rat(nil)
-	absScale := scale
-	if absScale < 0 {
-		absScale = -absScale
-	}
-	factor := new(big.Int).Exp(big.NewInt(10), big.NewInt(absScale), nil)
-	factorRat := new(big.Rat).SetInt(factor)
-	shifted := new(big.Rat)
-	if scale >= 0 {
-		shifted.Mul(rat, factorRat)
-	} else {
-		shifted.Quo(rat, factorRat)
-	}
-	p := new(big.Int).Set(shifted.Num())
-	q := shifted.Denom()
-	t := new(big.Int)
-	r := new(big.Int)
-	t.QuoRem(p, q, r)
-	// 2*|r| > q → round away from zero; otherwise truncate (ties go toward zero)
-	twoAbsR := new(big.Int).Mul(new(big.Int).Abs(r), big.NewInt(2))
-	var result *big.Int
-	if twoAbsR.Cmp(q) > 0 {
-		if p.Sign() >= 0 {
-			result = new(big.Int).Add(t, big.NewInt(1))
-		} else {
-			result = new(big.Int).Sub(t, big.NewInt(1))
-		}
-	} else {
-		result = t
-	}
-	resultRat := new(big.Rat).SetInt(result)
-	if scale >= 0 {
-		resultRat.Quo(resultRat, factorRat)
-	} else {
-		resultRat.Mul(resultRat, factorRat)
-	}
-	return &Number{v: new(big.Float).SetPrec(Prec).SetRat(resultRat)}
-}
+func roundCeiling(n *Number, scale int64) *Number  { return quantize(n, scale, apd.RoundUp) }
+func roundDown(n *Number, scale int64) *Number      { return quantize(n, scale, apd.RoundDown) }
+func roundHalfUp(n *Number, scale int64) *Number   { return quantize(n, scale, apd.RoundHalfUp) }
+func roundHalfDown(n *Number, scale int64) *Number { return quantize(n, scale, apd.RoundHalfDown) }
 
 func installBuiltinFunctions(prelude *Prelude) {
 	// conversion functions
@@ -320,9 +181,29 @@ func installBuiltinFunctions(prelude *Prelude) {
 		return feelToString(v)
 	}).Optional("from").Vararg("__extra"))
 
-	prelude.Bind("number", wrapTyped(func(v any) (*Number, error) {
-		return ParseNumberWithErr(v)
-	}).Required("from"))
+	prelude.Bind("number", NewNativeFunc(func(args map[string]any) (any, error) {
+		fromVal := args["from"]
+		groupSep, hasGroupSep := args["grouping separator"]
+		decSep, hasDecSep := args["decimal separator"]
+		if hasGroupSep || hasDecSep {
+			fromStr, ok := fromVal.(string)
+			if !ok {
+				return Null, nil
+			}
+			groupSepStr, ok := groupSep.(string)
+			if !ok {
+				return Null, nil
+			}
+			decSepStr, ok := decSep.(string)
+			if !ok {
+				return Null, nil
+			}
+			s := strings.ReplaceAll(strings.TrimSpace(fromStr), groupSepStr, "")
+			s = strings.ReplaceAll(s, decSepStr, ".")
+			return NewNumber(s), nil
+		}
+		return ParseNumberWithErr(fromVal)
+	}).Required("from").Optional("grouping separator", "decimal separator"))
 
 	// boolean functions
 	prelude.Bind("not", wrapTyped(func(v any) (bool, error) {
@@ -899,11 +780,10 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if !ok {
 			return Null, nil
 		}
-		_, acc := scaleNum.v.Int(nil)
-		if acc != big.Exact {
+		scale, err := scaleNum.v.Int64()
+		if err != nil {
 			return Null, nil
 		}
-		scale := scaleNum.Int64()
 		if scale < -6111 || scale > 6176 {
 			return Null, nil
 		}
@@ -931,11 +811,10 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if !ok {
 			return Null, nil
 		}
-		_, acc := scaleNum.v.Int(nil)
-		if acc != big.Exact {
+		scale, err := scaleNum.v.Int64()
+		if err != nil {
 			return Null, nil
 		}
-		scale := scaleNum.Int64()
 		if scale < -6111 || scale > 6176 {
 			return Null, nil
 		}
@@ -963,11 +842,10 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if !ok {
 			return Null, nil
 		}
-		_, acc := scaleNum.v.Int(nil)
-		if acc != big.Exact {
+		scale, err := scaleNum.v.Int64()
+		if err != nil {
 			return Null, nil
 		}
-		scale := scaleNum.Int64()
 		if scale < -6111 || scale > 6176 {
 			return Null, nil
 		}
@@ -995,11 +873,10 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if !ok {
 			return Null, nil
 		}
-		_, acc := scaleNum.v.Int(nil)
-		if acc != big.Exact {
+		scale, err := scaleNum.v.Int64()
+		if err != nil {
 			return Null, nil
 		}
-		scale := scaleNum.Int64()
 		if scale < -6111 || scale > 6176 {
 			return Null, nil
 		}

@@ -1,41 +1,50 @@
 package feel
 
-// spec on FEEL's number is https://kiegroup.github.io/dmn-feel-handbook/#number
+// FEEL numbers follow IEEE 754-2008 Decimal 128: 34 significant digits, half-even
+// rounding, exponent range [-6143, 6144]. This matches Java's BigDecimal with
+// MathContext.DECIMAL128. https://kiegroup.github.io/dmn-feel-handbook/#number
 import (
 	"encoding/json"
 	"errors"
-	"math"
-	"math/big"
+
+	"github.com/cockroachdb/apd/v3"
 )
 
-const (
-	Prec = 34 * 8
-)
+// decimal128Context is the authoritative context for all FEEL arithmetic.
+var decimal128Context = apd.Context{
+	Precision:   34,
+	Rounding:    apd.RoundHalfEven,
+	MaxExponent: 6144,
+	MinExponent: -6143,
+	Traps:       apd.DefaultTraps,
+}
 
 var (
 	ErrParseNumber = errors.New("fail to parse number")
 )
 
 type Number struct {
-	v *big.Float
+	v *apd.Decimal
 }
 
 func NewNumber(strn string) *Number {
-	v := new(big.Float)
-	v.SetPrec(Prec).SetString(strn)
-	return &Number{v: v}
+	d := new(apd.Decimal)
+	if _, _, err := d.SetString(strn); err != nil {
+		d = new(apd.Decimal)
+	}
+	return &Number{v: d}
 }
 
 func NewNumberFromInt64(input int64) *Number {
-	v := new(big.Float)
-	v.SetPrec(200).SetInt64(input)
-	return &Number{v: v}
+	return &Number{v: apd.New(input, 0)}
 }
 
 func NewNumberFromFloat(input float64) *Number {
-	v := new(big.Float)
-	v.SetPrec(200).SetFloat64(input)
-	return &Number{v: v}
+	d := new(apd.Decimal)
+	if _, err := d.SetFloat64(input); err != nil {
+		d = new(apd.Decimal)
+	}
+	return &Number{v: d}
 }
 
 func ParseNumberWithErr(v interface{}) (*Number, error) {
@@ -64,8 +73,12 @@ func N(v interface{}) *Number {
 }
 
 func (number Number) Int64() int64 {
-	i64v, _ := number.v.Int64()
-	return i64v
+	// Modf truncates toward zero so 3.8 → 3, -3.8 → -3, matching FEEL semantics.
+	integ := new(apd.Decimal)
+	frac := new(apd.Decimal)
+	number.v.Modf(integ, frac)
+	i, _ := integ.Int64()
+	return i
 }
 
 func (number Number) Int() int {
@@ -73,26 +86,26 @@ func (number Number) Int() int {
 }
 
 func (number Number) Float64() float64 {
-	f64v, _ := number.v.Float64()
-	return f64v
+	f, _ := number.v.Float64()
+	return f
 }
 
 func (number *Number) Add(other *Number) *Number {
-	newv := new(big.Float)
-	newv.SetPrec(Prec).Add(number.v, other.v)
-	return &Number{v: newv}
+	result := new(apd.Decimal)
+	decimal128Context.Add(result, number.v, other.v) //nolint:errcheck
+	return &Number{v: result}
 }
 
 func (number *Number) Sub(other *Number) *Number {
-	newv := new(big.Float)
-	newv.SetPrec(Prec).Sub(number.v, other.v)
-	return &Number{v: newv}
+	result := new(apd.Decimal)
+	decimal128Context.Sub(result, number.v, other.v) //nolint:errcheck
+	return &Number{v: result}
 }
 
 func (number *Number) Mul(other *Number) *Number {
-	newv := new(big.Float)
-	newv.SetPrec(Prec).Mul(number.v, other.v)
-	return &Number{v: newv}
+	result := new(apd.Decimal)
+	decimal128Context.Mul(result, number.v, other.v) //nolint:errcheck
+	return &Number{v: result}
 }
 
 func (number *Number) Cmp(other *Number) int {
@@ -100,66 +113,31 @@ func (number *Number) Cmp(other *Number) int {
 }
 
 func (number *Number) IntDiv(other *Number) *Number {
-	newv := new(big.Int)
-	a, _ := number.v.Int(nil)
-	b, _ := other.v.Int(nil)
-	newv.Div(a, b)
-	newf := new(big.Float)
-	newf.SetPrec(Prec).SetInt(newv)
-	return &Number{v: newf}
+	result := new(apd.Decimal)
+	decimal128Context.QuoInteger(result, number.v, other.v) //nolint:errcheck
+	return &Number{v: result}
 }
 
 func (number *Number) FloatDiv(other *Number) *Number {
-	newf := new(big.Float)
-	newf.SetPrec(Prec).Quo(number.v, other.v)
-	return &Number{v: newf}
+	result := new(apd.Decimal)
+	decimal128Context.Quo(result, number.v, other.v) //nolint:errcheck
+	return &Number{v: result}
 }
 
 func (number *Number) Pow(exp *Number) *Number {
-	if exp.v.IsInt() {
-		n, _ := exp.v.Int64()
-		return number.powInt(n)
-	}
-	a, _ := number.v.Float64()
-	b, _ := exp.v.Float64()
-	newf := new(big.Float)
-	newf.SetPrec(Prec).SetFloat64(math.Pow(a, b))
-	return &Number{v: newf}
-}
-
-func (number *Number) powInt(n int64) *Number {
-	result := new(big.Float).SetPrec(Prec).SetInt64(1)
-	base := new(big.Float).SetPrec(Prec).Set(number.v)
-	negative := n < 0
-	if negative {
-		n = -n
-	}
-	for n > 0 {
-		if n&1 == 1 {
-			result.SetPrec(Prec).Mul(result, base)
-		}
-		base.SetPrec(Prec).Mul(base, base)
-		n >>= 1
-	}
-	if negative {
-		one := new(big.Float).SetPrec(Prec).SetInt64(1)
-		result.SetPrec(Prec).Quo(one, result)
-	}
+	result := new(apd.Decimal)
+	decimal128Context.Pow(result, number.v, exp.v) //nolint:errcheck
 	return &Number{v: result}
 }
 
 func (number *Number) IsZero() bool {
-	return number.v.Sign() == 0
+	return number.v.IsZero()
 }
 
 func (number *Number) IntMod(other *Number) *Number {
-	newv := new(big.Int)
-	a, _ := number.v.Int(nil)
-	b, _ := other.v.Int(nil)
-	newv.Mod(a, b)
-	newf := new(big.Float)
-	newf.SetPrec(Prec).SetInt(newv)
-	return &Number{v: newf}
+	result := new(apd.Decimal)
+	decimal128Context.Rem(result, number.v, other.v) //nolint:errcheck
+	return &Number{v: result}
 }
 
 func (number Number) Equal(other Number) bool {
@@ -171,14 +149,10 @@ func (number Number) Compare(other Number) int {
 }
 
 func (number Number) String() string {
-	//return number.v.String()
-	return number.v.Text('f', 18)
+	return number.v.Text('f')
 }
 
 func (number Number) MarshalJSON() ([]byte, error) {
-	if f32v, acc := number.v.Float32(); acc == big.Exact {
-		return json.Marshal(f32v)
-	}
 	return json.Marshal(number.String())
 }
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/apd/v3"
 	"gotest.tools/assert"
 )
 
@@ -61,7 +62,15 @@ func TestEvalPairs(t *testing.T) {
 		{"1.2*10**3", N(1200), ""},
 
 		{"(function(a) 2 * a)(5)", N(10), ""},
-		{`string({PMT: function(p, r, n) (p*r/12)/(1-(1+r/12)**-n), result: PMT(600000, 0.0375, 360)}.result)`, "2778.693549432766768089", ""},
+		{`string({PMT: function(p, r, n) (p*r/12)/(1-(1+r/12)**-n), result: PMT(600000, 0.0375, 360)}.result)`, "2778.693549432766768088520383236299", ""},
+
+		// PMT (mortgage payment) inline — no helper function.
+		// Expected values are computed with IEEE 754-2008 Decimal 128 (34 significant
+		// digits per operation). They differ from float64 results beyond ~11 significant
+		// digits because repeating decimals like 0.0475/12 are rounded differently.
+		{`(600000*0.0375/12)/(1-(1+0.0375/12)**-360)`, N("2778.693549432766768088520383236299"), ""},
+		{`(30000*0.0475/12)/(1-(1+0.0475/12)**-60)`, N("562.7073593732659271562143285576524"), ""},
+		{`(600000*0.0399/12)/(1-(1+0.0399/12)**-360)`, N("2861.033777003901636716262779605767"), ""},
 		{"true", true, ""},
 		{"false", false, ""},
 		{`"hello" + " world"`, "hello world", ""},
@@ -111,6 +120,17 @@ func TestEvalPairs(t *testing.T) {
 		{`2 ** 10`, N(1024), ""},
 		{`"foo" ** 4`, Null, ""},
 		{`true ** 4`, Null, ""},
+
+		// scientific notation literals
+		{`1.2e3`, N(1200), ""},
+		{`1.5e-2`, N("0.015"), ""},
+		{`1.2e+3`, N(1200), ""},
+		{`5e2`, N(500), ""},
+
+		// number() built-in: 3-argument form with grouping and decimal separators
+		{`number("1.000.000,01", ".", ",")`, N("1000000.01"), ""},
+		{`number("1,000,000.01", ",", ".")`, N("1000000.01"), ""},
+		{`number("1.000.000,01 ", ".", ",")`, N("1000000.01"), ""},
 
 		// boolean: and (three-valued logic)
 		{`true and true`, true, ""},
@@ -752,7 +772,10 @@ func TestLoanPayment(t *testing.T) {
 	assert.NilError(t, err)
 	n, ok := v.(*Number)
 	assert.Assert(t, ok, "expected *Number result")
-	assert.Equal(t, n.v.Text('f', 11), "2778.69354943277")
+	// Round to 11 decimal places and verify.
+	rounded := new(apd.Decimal)
+	decimal128Context.Quantize(rounded, n.v, -11) //nolint:errcheck
+	assert.Equal(t, rounded.Text('f'), "2778.69354943277")
 }
 
 func TestVacationDays(t *testing.T) {
