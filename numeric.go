@@ -20,9 +20,9 @@ var decimal128Context = apd.Context{
 	Traps:       apd.DefaultTraps,
 }
 
-// displayContext rounds to 15 significant digits for display/output.
+// displayContext rounds to 34 significant digits (DECIMAL128 full spec) for display/output.
 var displayContext = apd.Context{
-	Precision:   15,
+	Precision:   34,
 	Rounding:    apd.RoundHalfEven,
 	MaxExponent: 6144,
 	MinExponent: -6143,
