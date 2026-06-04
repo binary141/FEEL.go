@@ -95,6 +95,11 @@ func (number Number) Int() int {
 }
 
 func (number Number) Float64() float64 {
+	f, _ := number.v.Float64()
+	return f
+}
+
+func (number Number) DisplayFloat64() float64 {
 	rounded := new(apd.Decimal)
 	displayContext.Round(rounded, number.v) //nolint:errcheck
 	f, _ := rounded.Float64()
