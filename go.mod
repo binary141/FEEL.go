@@ -1,6 +1,6 @@
 module github.com/binary141/FEEL.go
 
-go 1.19
+go 1.26
 
 require (
 	github.com/cockroachdb/apd/v3 v3.2.3

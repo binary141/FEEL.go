@@ -70,7 +70,7 @@ func ParseTime(temporalStr string) (*FEELTime, error) {
 	return nil, ErrParseTemporal
 }
 
-func (st FEELTime) GetAttr(name string) (interface{}, bool) {
+func (st FEELTime) GetAttr(name string) (any, bool) {
 	switch name {
 	case "hour":
 		return st.t.Hour(), true
@@ -112,7 +112,7 @@ func (date FEELDate) Time() time.Time {
 	return date.t
 }
 
-func (date FEELDate) GetAttr(name string) (interface{}, bool) {
+func (date FEELDate) GetAttr(name string) (any, bool) {
 	switch name {
 	case "year":
 		return date.t.Year(), true
@@ -181,7 +181,7 @@ func (sdt FEELDatetime) Compare(other FEELDatetime) int {
 	}
 }
 
-func (sdt FEELDatetime) GetAttr(name string) (interface{}, bool) {
+func (sdt FEELDatetime) GetAttr(name string) (any, bool) {
 	switch name {
 	case "year":
 		return sdt.t.Year(), true
@@ -370,7 +370,7 @@ func NewFEELDuration(dur time.Duration) *FEELDuration {
 	return d
 }
 
-func (dur FEELDuration) GetAttr(name string) (interface{}, bool) {
+func (dur FEELDuration) GetAttr(name string) (any, bool) {
 	switch name {
 	case "years":
 		return dur.Years, true
@@ -533,10 +533,10 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 			}
 			dur.Seconds = int(v)
 			frac := submatches[11]
-		if frac == "." {
-			frac = ""
-		}
-		dur.SecondsFrac = frac // ".1234" or ""
+			if frac == "." {
+				frac = ""
+			}
+			dur.SecondsFrac = frac // ".1234" or ""
 		}
 		return dur, nil
 	}
@@ -552,7 +552,7 @@ func MustParseDuration(s string) *FEELDuration {
 	return d
 }
 
-func ParseTemporalValue(temporalStr string) (interface{}, error) {
+func ParseTemporalValue(temporalStr string) (any, error) {
 	if v, err := ParseDatetime(temporalStr); err == nil {
 		return v, nil
 	}
@@ -590,7 +590,7 @@ func installDatetimeFunctions(prelude *Prelude) {
 		return d, nil
 	}).Required("from"))
 
-	prelude.Bind("time", wrapTyped(func(frm string) (interface{}, error) {
+	prelude.Bind("time", wrapTyped(func(frm string) (any, error) {
 		return ParseTime(frm)
 	}).Required("from"))
 
@@ -633,7 +633,7 @@ func installDatetimeFunctions(prelude *Prelude) {
 		return &FEELDatetime{t: combined, src: src}, nil
 	}).Optional("from", "time").Vararg("__extra"))
 
-	prelude.Bind("duration", wrapTyped(func(frm string) (interface{}, error) {
+	prelude.Bind("duration", wrapTyped(func(frm string) (any, error) {
 		return ParseDuration(frm)
 	}).Required("from"))
 
@@ -652,31 +652,31 @@ func installDatetimeFunctions(prelude *Prelude) {
 		return &FEELDate{t: time.Now()}, nil
 	}).Vararg("__extra"))
 
-	prelude.Bind("day of week", wrapTyped(func(v HasDate) (interface{}, error) {
+	prelude.Bind("day of week", wrapTyped(func(v HasDate) (any, error) {
 		return v.Date().Weekday(), nil
 	}).Required("date"))
 
-	prelude.Bind("day of year", wrapTyped(func(v HasDate) (interface{}, error) {
+	prelude.Bind("day of year", wrapTyped(func(v HasDate) (any, error) {
 		return v.Date().YearDay(), nil
 	}).Required("date"))
 
-	prelude.Bind("week of year", wrapTyped(func(v HasDate) (interface{}, error) {
+	prelude.Bind("week of year", wrapTyped(func(v HasDate) (any, error) {
 		_, week := v.Date().ISOWeek()
 		return week, nil
 	}).Required("date"))
 
-	prelude.Bind("month of year", wrapTyped(func(v HasDate) (interface{}, error) {
+	prelude.Bind("month of year", wrapTyped(func(v HasDate) (any, error) {
 		return v.Date().Month(), nil
 	}).Required("date"))
 
-	prelude.Bind("abs", wrapTyped(func(dur *FEELDuration) (interface{}, error) {
+	prelude.Bind("abs", wrapTyped(func(dur *FEELDuration) (any, error) {
 		newDur := *dur
 		newDur.Neg = false
 		return newDur, nil
 	}).Required("dur"))
 
 	// refs https://docs.camunda.io/docs/components/modeler/feel/builtin-functions/feel-built-in-functions-temporal/#last-day-of-monthdate
-	prelude.Bind("last day of month", wrapTyped(func(v HasDate) (interface{}, error) {
+	prelude.Bind("last day of month", wrapTyped(func(v HasDate) (any, error) {
 		month := v.Date().Month()
 		year := v.Date().Year()
 		if month == 12 {

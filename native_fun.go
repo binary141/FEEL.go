@@ -26,7 +26,7 @@ func (err ArgSizeError) Error() string {
 }
 
 // native function
-type NativeFunDef func(args map[string]interface{}) (interface{}, error)
+type NativeFunDef func(args map[string]any) (any, error)
 
 type NativeFun struct {
 	fn               NativeFunDef
@@ -69,7 +69,7 @@ func (nfun NativeFun) ArgNameAt(at int) (string, bool) {
 	return "", false
 }
 
-func (nfun *NativeFun) Call(intp *Interpreter, args map[string]interface{}) (interface{}, error) {
+func (nfun *NativeFun) Call(intp *Interpreter, args map[string]any) (any, error) {
 	v, err := nfun.fn(args)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func (nfun *NativeFun) Call(intp *Interpreter, args map[string]interface{}) (int
 }
 
 // macro
-type MacroDef func(intp *Interpreter, args map[string]Node, varArgs []Node) (interface{}, error)
+type MacroDef func(intp *Interpreter, args map[string]Node, varArgs []Node) (any, error)
 type Macro struct {
 	fn               MacroDef
 	requiredArgNames []string
@@ -111,7 +111,7 @@ func (macro *Macro) Help(help string) *Macro {
 
 // Prelude
 type Prelude struct {
-	vars map[string]interface{}
+	vars map[string]any
 }
 
 var loadOnce sync.Once
@@ -119,7 +119,7 @@ var inst *Prelude
 
 func GetPrelude() *Prelude {
 	loadOnce.Do(func() {
-		inst = &Prelude{vars: make(map[string]interface{})}
+		inst = &Prelude{vars: make(map[string]any)}
 		inst.Load()
 	})
 	return inst
@@ -158,8 +158,8 @@ func (prelude *Prelude) Load() {
 	// 	}
 	// }).Required("name", "value").Help("bind value to name in resolved scope, if not found, it's bind to current top scope(the same as 'bind')"))
 
-	prelude.Bind("block", NewMacro(func(intp *Interpreter, args map[string]Node, exprlist []Node) (interface{}, error) {
-		var lastValue interface{}
+	prelude.Bind("block", NewMacro(func(intp *Interpreter, args map[string]Node, exprlist []Node) (any, error) {
+		var lastValue any
 		var err error
 		for _, expr := range exprlist {
 			lastValue, err = expr.Eval(intp)
@@ -170,7 +170,7 @@ func (prelude *Prelude) Load() {
 		return lastValue, nil
 	}).Vararg("express list").Help("quote a sequence of expresses and return the last result"))
 
-	prelude.Bind("help", NewMacro(func(intp *Interpreter, args map[string]Node, exprlist []Node) (interface{}, error) {
+	prelude.Bind("help", NewMacro(func(intp *Interpreter, args map[string]Node, exprlist []Node) (any, error) {
 		v, err := args["value"].Eval(intp)
 		if err != nil {
 			return nil, err
@@ -185,7 +185,7 @@ func (prelude *Prelude) Load() {
 		}
 	}).Required("value").Help("the help information of a value"))
 
-	prelude.Bind("typeof", NewMacro(func(intp *Interpreter, args map[string]Node, exprlist []Node) (interface{}, error) {
+	prelude.Bind("typeof", NewMacro(func(intp *Interpreter, args map[string]Node, exprlist []Node) (any, error) {
 		v, err := args["value"].Eval(intp)
 		if err != nil {
 			return nil, err
@@ -199,7 +199,7 @@ func (prelude *Prelude) Load() {
 	installRangeFunctions(prelude)
 }
 
-func (prelude *Prelude) Bind(name string, value interface{}) *Prelude {
+func (prelude *Prelude) Bind(name string, value any) *Prelude {
 	if _, ok := prelude.vars[name]; ok {
 		panic(fmt.Sprintf("bind(), name '%s' already bound", name))
 	}
@@ -207,13 +207,13 @@ func (prelude *Prelude) Bind(name string, value interface{}) *Prelude {
 	return prelude
 }
 
-func (prelude *Prelude) Resolve(name string) (interface{}, bool) {
+func (prelude *Prelude) Resolve(name string) (any, bool) {
 	v, ok := prelude.vars[name]
 	return v, ok
 }
 
 // buildin native funcs
-func nativeBind(intp *Interpreter, varname string, value interface{}) (interface{}, error) {
+func nativeBind(intp *Interpreter, varname string, value any) (any, error) {
 	intp.Bind(varname, value)
 	return nil, nil
 }

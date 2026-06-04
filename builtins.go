@@ -7,6 +7,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -161,7 +162,7 @@ func quantize(n *Number, scale int64, rounding apd.Rounder) *Number {
 }
 
 func roundCeiling(n *Number, scale int64) *Number  { return quantize(n, scale, apd.RoundUp) }
-func roundDown(n *Number, scale int64) *Number      { return quantize(n, scale, apd.RoundDown) }
+func roundDown(n *Number, scale int64) *Number     { return quantize(n, scale, apd.RoundDown) }
 func roundHalfUp(n *Number, scale int64) *Number   { return quantize(n, scale, apd.RoundHalfUp) }
 func roundHalfDown(n *Number, scale int64) *Number { return quantize(n, scale, apd.RoundHalfDown) }
 
@@ -258,10 +259,7 @@ func installBuiltinFunctions(prelude *Prelude) {
 		}
 		endPos := strLen
 		if args.Length != nil {
-			endPos = startPos + int(args.Length.Int64())
-			if endPos > strLen {
-				endPos = strLen
-			}
+			endPos = min(startPos+int(args.Length.Int64()), strLen)
 		}
 		subs := args.Str[startPos:endPos]
 		return subs, nil
@@ -288,19 +286,19 @@ func installBuiltinFunctions(prelude *Prelude) {
 	}).Required("string", "match"))
 
 	prelude.Bind("substring before", wrapTyped(func(s string, match string) (string, error) {
-		idx := strings.Index(s, match)
-		if idx < 0 {
+		before, _, ok := strings.Cut(s, match)
+		if !ok {
 			return "", nil
 		}
-		return s[:idx], nil
+		return before, nil
 	}).Required("string", "match"))
 
 	prelude.Bind("substring after", wrapTyped(func(s string, match string) (string, error) {
-		idx := strings.Index(s, match)
-		if idx < 0 {
+		_, after, ok := strings.Cut(s, match)
+		if !ok {
 			return "", nil
 		}
-		return s[idx+len(match):], nil
+		return after, nil
 	}).Required("string", "match"))
 
 	prelude.Bind("matches", wrapTyped(func(s string, pattern string) (bool, error) {
@@ -517,10 +515,8 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err != nil {
 			return nil, err
 		}
-		for _, v := range list {
-			if boolValue(v) {
-				return true, nil
-			}
+		if slices.ContainsFunc(list, boolValue) {
+			return true, nil
 		}
 		return false, nil
 	}).Vararg("list"))
@@ -530,10 +526,8 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err != nil {
 			return nil, err
 		}
-		for _, v := range list {
-			if boolValue(v) {
-				return true, nil
-			}
+		if slices.ContainsFunc(list, boolValue) {
+			return true, nil
 		}
 		return false, nil
 	}).Vararg("list"))
@@ -559,10 +553,7 @@ func installBuiltinFunctions(prelude *Prelude) {
 		}
 		endPos := len(args.List)
 		if args.Length != nil {
-			endPos = startPos + int(args.Length.Int64())
-			if endPos >= len(args.List) {
-				endPos = len(args.List)
-			}
+			endPos = min(startPos+int(args.Length.Int64()), len(args.List))
 		}
 		subs := args.List[startPos:endPos]
 		return subs, nil
@@ -606,10 +597,7 @@ func installBuiltinFunctions(prelude *Prelude) {
 
 	prelude.Bind("insert before", wrapTyped(func(list []any, pos *Number, newItem any) ([]any, error) {
 		// The position starts at the index 1. The last position is -1
-		position := fromFEELIndex(pos.Int())
-		if position > len(list) {
-			position = len(list)
-		}
+		position := min(fromFEELIndex(pos.Int()), len(list))
 		// make a copy of the original list
 		var tmpList []any
 		tmpList = append(tmpList, list[:position]...)
@@ -622,10 +610,7 @@ func installBuiltinFunctions(prelude *Prelude) {
 
 	prelude.Bind("remove", wrapTyped(func(list []any, pos *Number) ([]any, error) {
 		// The position starts at the index 1. The last position is -1
-		position := fromFEELIndex(pos.Int())
-		if position > len(list) {
-			position = len(list)
-		}
+		position := min(fromFEELIndex(pos.Int()), len(list))
 		// make a copy of the original list
 		var tmpList []any
 		tmpList = append(tmpList, list[:position]...)

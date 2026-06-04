@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
 )
 
 func (binop Binop) Eval(intp *Interpreter) (any, error) {
@@ -160,10 +159,7 @@ func compareInterfaces(leftVal, rightVal any) (int, error) {
 }
 
 func compareArrays(a, b []any) (int, error) {
-	minSize := len(a)
-	if minSize > len(b) {
-		minSize = len(b)
-	}
+	minSize := min(len(a), len(b))
 	for i := 0; i < minSize; i++ {
 		leftVal := a[i]
 		rightVal := b[i]

@@ -56,7 +56,7 @@ func NewNumberFromFloat(input float64) *Number {
 	return &Number{v: d}
 }
 
-func ParseNumberWithErr(v interface{}) (*Number, error) {
+func ParseNumberWithErr(v any) (*Number, error) {
 	switch vv := v.(type) {
 	case int:
 		return NewNumberFromInt64(int64(vv)), nil
@@ -73,7 +73,7 @@ func ParseNumberWithErr(v interface{}) (*Number, error) {
 	}
 }
 
-func N(v interface{}) *Number {
+func N(v any) *Number {
 	n, err := ParseNumberWithErr(v)
 	if err != nil {
 		panic(err)

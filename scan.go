@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -115,24 +116,14 @@ func (token ScannerToken) IsOp() bool {
 }
 
 func (token ScannerToken) Expect(tokenKinds ...string) bool {
-	for _, kind := range tokenKinds {
-		if token.Kind == kind {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tokenKinds, token.Kind)
 }
 
 func (token ScannerToken) ExpectKeywords(words ...string) bool {
 	if token.Kind != TokenKeyword {
 		return false
 	}
-	for _, kw := range words {
-		if token.Value == kw {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(words, token.Value)
 }
 
 type Scanner struct {

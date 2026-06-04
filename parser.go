@@ -6,6 +6,7 @@ package feel
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -644,12 +645,7 @@ func (p *Parser) parseNull() (Node, error) {
 }
 
 func containsKeywords(keywords []string, kw string) bool {
-	for _, stopKw := range keywords {
-		if stopKw == kw {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(keywords, kw)
 }
 
 func (p *Parser) parseName(stopKeywords ...string) (string, error) {

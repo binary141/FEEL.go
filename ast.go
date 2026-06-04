@@ -369,8 +369,8 @@ func (node SomeExpr) Repr() string {
 
 // instance of expression: value instance of typeName
 type InstanceOfNode struct {
-	Value    Node
-	TypeName string
+	Value     Node
+	TypeName  string
 	textRange TextRange
 }
 

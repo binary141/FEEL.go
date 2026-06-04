@@ -1,5 +1,7 @@
 package feel
 
+import "maps"
+
 func contextGetByKeys(ctx map[string]any, keys []string) (any, bool) {
 	for i, key := range keys {
 		if i == len(keys)-1 {
@@ -43,9 +45,7 @@ func contextProbePut(ctx map[string]any, keys []string) bool {
 
 func contextCopy(ctx map[string]any) map[string]any {
 	newCtx := make(map[string]any)
-	for k, v := range ctx {
-		newCtx[k] = v
-	}
+	maps.Copy(newCtx, ctx)
 	return newCtx
 }
 
@@ -175,9 +175,7 @@ func installContextFunctions(prelude *Prelude) {
 			if !ok {
 				return Null, nil
 			}
-			for k, v := range ctx {
-				merged[k] = v
-			}
+			maps.Copy(merged, ctx)
 		}
 		return merged, nil
 	}).Optional("contexts").Vararg("__extra"))

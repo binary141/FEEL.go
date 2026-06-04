@@ -9,10 +9,10 @@ import (
 
 func typeIsStruct(tp reflect.Type) bool {
 	return (tp.Kind() == reflect.Struct ||
-		(tp.Kind() == reflect.Ptr && typeIsStruct(tp.Elem())))
+		(tp.Kind() == reflect.Pointer && typeIsStruct(tp.Elem())))
 }
 
-func interfaceToValue(a interface{}, outputType reflect.Type) (reflect.Value, error) {
+func interfaceToValue(a any, outputType reflect.Type) (reflect.Value, error) {
 	if outputType.Kind() == reflect.Interface {
 		if a == nil {
 			return reflect.Zero(outputType), nil
@@ -40,11 +40,11 @@ func interfaceToValue(a interface{}, outputType reflect.Type) (reflect.Value, er
 	return reflect.ValueOf(output), nil
 }
 
-func valueToInterface(tp reflect.Type, val reflect.Value) (interface{}, error) {
-	var output interface{}
+func valueToInterface(tp reflect.Type, val reflect.Value) (any, error) {
+	var output any
 	//if typeIsStruct(tp) {
 	if false {
-		output = make(map[string]interface{})
+		output = make(map[string]any)
 	} else {
 		output = reflect.Zero(tp).Interface()
 	}
@@ -64,7 +64,7 @@ func valueToInterface(tp reflect.Type, val reflect.Value) (interface{}, error) {
 	return output, nil
 }
 
-func wrapTyped(tfunc interface{}) *NativeFun {
+func wrapTyped(tfunc any) *NativeFun {
 	funcType := reflect.TypeOf(tfunc)
 	if funcType.Kind() != reflect.Func {
 		panic("tfunc is not func type")
@@ -96,14 +96,14 @@ func wrapTyped(tfunc interface{}) *NativeFun {
 	}
 
 	errType := funcType.Out(1)
-	errInterface := reflect.TypeOf((*error)(nil)).Elem()
+	errInterface := reflect.TypeFor[error]()
 
 	if !errType.Implements(errInterface) {
 		panic("second output does not implement error")
 	}
 
 	nativeFun := &NativeFun{}
-	nativeFun.fn = func(args map[string]interface{}) (interface{}, error) {
+	nativeFun.fn = func(args map[string]any) (any, error) {
 		// check inputs
 		if numIn > firstArgNum+len(nativeFun.requiredArgNames) {
 			return nil, errors.New("no enough params size")

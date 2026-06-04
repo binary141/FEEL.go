@@ -2,8 +2,8 @@ package feel
 
 import (
 	"fmt"
-	"testing"
 	"gotest.tools/assert"
+	"testing"
 )
 
 func TestDeepEqualDT(t *testing.T) {
