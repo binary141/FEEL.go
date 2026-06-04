@@ -174,6 +174,38 @@ func TestMapValue(t *testing.T) {
 	assert.Equal([]string{"name", "string"}, une.expects)
 }
 
+func FuzzParser(f *testing.F) {
+	seeds := []string{
+		`abc + 3 * sum(2, 7) - @"2023-06-01 05:01:00@Asia/Shanghai"`,
+		`"a string\n value"`,
+		`abc + 3 * u - eight.value`,
+		`a = 3`,
+		`if a > 3 then "yes" else "no"`,
+		`for x in [3, 4], y in [5, 9] return x * y`,
+		`some x in [3, 4, 5, 6, 9] satisfies x >= 5`,
+		`(2..5]`,
+		`[2..5 * 9)`,
+		`(2..5], >= 6, 100, !=888`,
+		`a.b.c(3, 4).d.e[4].f + 1001`,
+		`string contains("abc def", "e")`,
+		`function(a, b) a + b * 2`,
+		`{ a: 1, b: @"2023-06-01", c: [1, 2, 3]}`,
+		`@"2023-06-07"`,
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		// The parser must never panic on arbitrary input.
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("parser panicked on input %q: %v", input, r)
+			}
+		}()
+		ParseString(input) //nolint:errcheck
+	})
+}
+
 func TestTemporal(t *testing.T) {
 	assert := assert.New(t)
 

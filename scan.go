@@ -2,10 +2,10 @@ package feel
 
 import (
 	"errors"
-	"fmt"
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -218,7 +218,14 @@ func (scanner *Scanner) Next() error {
 	if scanner.rest == "" {
 		scanner.currentToken = ScannerToken{Kind: TokenEOF, Pos: scanner.Pos}
 		return nil
-	} else {
-		return fmt.Errorf("at position %d %d, bad input %s", scanner.Pos.Row, scanner.Pos.Column, scanner.rest)
 	}
+	// Advance past the unrecognized character so the parser always sees a
+	// new token and cannot loop forever on the same position.
+	// utf8.DecodeRuneInString returns size=1 for invalid UTF-8 bytes, so
+	// badChar is always the correct slice length to pass to goAhead.
+	_, size := utf8.DecodeRuneInString(scanner.rest)
+	badChar := scanner.rest[:size]
+	scanner.currentToken = ScannerToken{Kind: "bad", Value: badChar, Pos: scanner.Pos}
+	scanner.goAhead(badChar)
+	return nil
 }
