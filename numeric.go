@@ -99,13 +99,6 @@ func (number Number) Float64() float64 {
 	return f
 }
 
-func (number Number) DisplayFloat64() float64 {
-	rounded := new(apd.Decimal)
-	displayContext.Round(rounded, number.v) //nolint:errcheck
-	f, _ := rounded.Float64()
-	return f
-}
-
 func (number *Number) Add(other *Number) *Number {
 	result := new(apd.Decimal)
 	decimal128Context.Add(result, number.v, other.v) //nolint:errcheck
@@ -162,6 +155,14 @@ func (number Number) Equal(other Number) bool {
 
 func (number Number) Compare(other Number) int {
 	return number.v.Cmp(other.v)
+}
+
+func (number Number) CompareRounded(other Number, decimalPlaces int32) int {
+	a := new(apd.Decimal)
+	b := new(apd.Decimal)
+	displayContext.Quantize(a, number.v, -decimalPlaces) //nolint:errcheck
+	displayContext.Quantize(b, other.v, -decimalPlaces)  //nolint:errcheck
+	return a.Cmp(b)
 }
 
 func (number Number) String() string {
