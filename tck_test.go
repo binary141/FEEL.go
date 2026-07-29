@@ -1,12 +1,13 @@
 package feel
 
 // This file dynamically runs the DMN TCK (https://github.com/dmn-tck/tck)
-// "compliance level 2" test suite against FEEL.go, but only for the subset
-// of test models whose decision logic is plain FEEL (a literalExpression),
-// optionally backed by a Business Knowledge Model FEEL function. Test
-// models that rely on decision tables (hit-policy evaluation) are outside
-// FEEL.go's scope (it evaluates FEEL, not DMN decision tables) and are
-// skipped.
+// "compliance level 2" and "compliance level 3" test suites against
+// FEEL.go, but only for the subset of test models whose decision logic is
+// plain FEEL (a literalExpression), optionally backed by a Business
+// Knowledge Model FEEL function. Test models that rely on decision tables
+// (hit-policy evaluation), contexts, relations, invocations, lists, or
+// conditionals as decision logic are outside FEEL.go's scope (it evaluates
+// FEEL, not DMN decision tables/graphs) and are skipped.
 
 import (
 	"encoding/xml"
@@ -22,6 +23,7 @@ import (
 )
 
 const tckComplianceLevel2Dir = "tck/TestCases/compliance-level-2"
+const tckComplianceLevel3Dir = "tck/TestCases/compliance-level-3"
 
 // ---- DMN model (subset of the schema we care about) ----
 
@@ -123,24 +125,28 @@ type tckValue struct {
 	Text string `xml:",chardata"`
 }
 
-type tckComponent struct {
-	Name      string         `xml:"name,attr"`
-	Value     *tckValue      `xml:"value"`
-	Component []tckComponent `xml:"component"`
+// tckNode is a recursive value node: a scalar <value>, a <component>-based
+// structure (context/relation row), or a <list> of nested nodes.
+type tckNode struct {
+	Value     *tckValue `xml:"value"`
+	Component []struct {
+		Name string `xml:"name,attr"`
+		tckNode
+	} `xml:"component"`
+	List *struct {
+		Items []tckNode `xml:"item"`
+	} `xml:"list"`
 }
 
 type tckInputNode struct {
-	Name      string         `xml:"name,attr"`
-	Value     *tckValue      `xml:"value"`
-	Component []tckComponent `xml:"component"`
+	Name string `xml:"name,attr"`
+	tckNode
 }
 
 type tckResultNode struct {
-	Name     string `xml:"name,attr"`
-	Type     string `xml:"type,attr"`
-	Expected struct {
-		Value *tckValue `xml:"value"`
-	} `xml:"expected"`
+	Name     string  `xml:"name,attr"`
+	Type     string  `xml:"type,attr"`
+	Expected tckNode `xml:"expected"`
 }
 
 // convertValue turns a TCK <value xsi:type="..."> into a Go/FEEL value.
@@ -168,31 +174,31 @@ func convertValue(v *tckValue) (any, error) {
 	}
 }
 
-func convertComponents(comps []tckComponent) (map[string]any, error) {
-	m := make(map[string]any, len(comps))
-	for _, c := range comps {
-		if len(c.Component) > 0 {
-			sub, err := convertComponents(c.Component)
+func (n tckNode) toValue() (any, error) {
+	switch {
+	case n.List != nil:
+		items := make([]any, len(n.List.Items))
+		for i, it := range n.List.Items {
+			val, err := it.toValue()
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("list item %d: %w", i, err)
 			}
-			m[c.Name] = sub
-			continue
+			items[i] = val
 		}
-		val, err := convertValue(c.Value)
-		if err != nil {
-			return nil, fmt.Errorf("component %q: %w", c.Name, err)
+		return items, nil
+	case len(n.Component) > 0:
+		m := make(map[string]any, len(n.Component))
+		for _, c := range n.Component {
+			val, err := c.tckNode.toValue()
+			if err != nil {
+				return nil, fmt.Errorf("component %q: %w", c.Name, err)
+			}
+			m[c.Name] = val
 		}
-		m[c.Name] = val
+		return m, nil
+	default:
+		return convertValue(n.Value)
 	}
-	return m, nil
-}
-
-func (n tckInputNode) toValue() (any, error) {
-	if len(n.Component) > 0 {
-		return convertComponents(n.Component)
-	}
-	return convertValue(n.Value)
 }
 
 // numbersApproxEqual compares two FEEL numbers with a generous relative
@@ -223,12 +229,16 @@ func numbersApproxEqual(a, b *Number) bool {
 	return diff.Cmp(tol) <= 0
 }
 
-func valuesEqual(t *testing.T, expected *tckValue, actual any) bool {
+func valuesEqual(t *testing.T, expected tckNode, actual any) bool {
 	t.Helper()
-	want, err := convertValue(expected)
+	want, err := expected.toValue()
 	if err != nil {
 		t.Fatalf("bad expected value: %v", err)
 	}
+	return deepValuesEqual(want, actual)
+}
+
+func deepValuesEqual(want, actual any) bool {
 	switch w := want.(type) {
 	case *NullValue:
 		_, ok := actual.(*NullValue)
@@ -245,6 +255,29 @@ func valuesEqual(t *testing.T, expected *tckValue, actual any) bool {
 	case string:
 		a, ok := actual.(string)
 		return ok && a == w
+	case []any:
+		a, ok := actual.([]any)
+		if !ok || len(a) != len(w) {
+			return false
+		}
+		for i := range w {
+			if !deepValuesEqual(w[i], a[i]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		a, ok := actual.(map[string]any)
+		if !ok || len(a) != len(w) {
+			return false
+		}
+		for k, wv := range w {
+			av, ok := a[k]
+			if !ok || !deepValuesEqual(wv, av) {
+				return false
+			}
+		}
+		return true
 	default:
 		return false
 	}
@@ -347,7 +380,14 @@ func (m *tckModel) baseScope() (Scope, error) {
 }
 
 func TestTCKComplianceLevel2(t *testing.T) {
-	root := tckComplianceLevel2Dir
+	runTCKSuite(t, tckComplianceLevel2Dir)
+}
+
+func TestTCKComplianceLevel3(t *testing.T) {
+	runTCKSuite(t, tckComplianceLevel3Dir)
+}
+
+func runTCKSuite(t *testing.T, root string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Skipf("tck checkout not found at %s: %v", root, err)
@@ -410,8 +450,9 @@ func TestTCKComplianceLevel2(t *testing.T) {
 							t.Fatalf("decision %q: eval error: %v", rn.Name, err)
 						}
 
-						if !valuesEqual(t, rn.Expected.Value, got) {
-							t.Errorf("decision %q: got %v, want %s", rn.Name, got, rn.Expected.Value.Text)
+						if !valuesEqual(t, rn.Expected, got) {
+							want, _ := rn.Expected.toValue()
+							t.Errorf("decision %q: got %v, want %v", rn.Name, got, want)
 						}
 					}
 				})
