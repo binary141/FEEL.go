@@ -14,6 +14,11 @@ golint:
 	go fmt ./...
 	go vet ./...
 
+fuzztime := 30s
+
+fuzz:
+	go test -run '^$$' -fuzz FuzzParser -fuzztime $(fuzztime) .
+
 build: build-cli
 
 build-cli: bin/feel
@@ -24,5 +29,5 @@ bin/feel: ${gofiles}
 clean:
 	rm -rf build dist bin/*
 
-.PHONY: test gofmt build-cli clean
+.PHONY: test gofmt build-cli clean fuzz
 .SECONDARY: $(buildarchdirs)
