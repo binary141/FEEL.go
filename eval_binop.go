@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 )
 
 func isRangeOrUnaryTest(v any) bool {
@@ -115,9 +116,11 @@ func compareInterfaces(leftVal, rightVal any) (int, error) {
 		}
 	case HasTime:
 		if rightHasTime, ok := rightVal.(HasTime); ok {
-			if v.Time().Equal(rightHasTime.Time()) {
+			left := v.Time().Truncate(time.Second)
+			right := rightHasTime.Time().Truncate(time.Second)
+			if left.Equal(right) {
 				return 0, nil
-			} else if v.Time().Before(rightHasTime.Time()) {
+			} else if left.Before(right) {
 				return -1, nil
 			} else {
 				return 1, nil

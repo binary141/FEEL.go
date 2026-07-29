@@ -743,6 +743,9 @@ var timeDurationPattern = regexp.MustCompile(`^(\-?)P((\d+)D)?(T((\d+)H)?((\d+)M
 func ParseDuration(temporalStr string) (*FEELDuration, error) {
 	// parse year-month duration
 	if submatches := yearmonthDurationPattern.FindStringSubmatch(temporalStr); submatches != nil {
+		if submatches[2] == "" && submatches[4] == "" {
+			return nil, ErrParseTemporal
+		}
 		dur := &FEELDuration{IsYM: true}
 		if submatches[1] != "" {
 			dur.Neg = true
@@ -769,6 +772,9 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 
 	// parse day-time duration
 	if submatches := timeDurationPattern.FindStringSubmatch(temporalStr); submatches != nil {
+		if submatches[2] == "" && submatches[5] == "" && submatches[7] == "" && submatches[9] == "" {
+			return nil, ErrParseTemporal
+		}
 		dur := &FEELDuration{}
 		if submatches[1] != "" {
 			dur.Neg = true
