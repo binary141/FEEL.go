@@ -596,7 +596,7 @@ func (p *Parser) parseIndexRest(exp Node) (Node, error) {
 func (p *Parser) parseDotRest(exp Node) (Node, error) {
 	p.scanner.Next()
 	// parse index arguments
-	attr, err := p.parseName()
+	attr, err := p.parseName(reservedKeywords...)
 	if err != nil {
 		return nil, err
 	}
@@ -680,6 +680,16 @@ func (p *Parser) singleElement() (Node, error) {
 var specialNameKeywordPrefixes = map[string]bool{
 	"date":  true, // date and time(...)
 	"years": true, // years and months duration(...)
+}
+
+// reservedKeywords are the keywords recognized by the scanner (see the
+// TokenKeyword pattern in scan.go). Passed as stopKeywords to parseName
+// when parsing a dotted attribute name, so a reserved word immediately
+// following the attribute (e.g. "settings.goldDiscount else ...") ends the
+// name instead of being folded into it.
+var reservedKeywords = []string{
+	"true", "false", "and", "or", "null", "function", "if", "then", "else",
+	"loop", "for", "some", "every", "in", "return", "satisfies",
 }
 
 func (p *Parser) parseVar() (Node, error) {
