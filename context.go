@@ -1,6 +1,7 @@
 package feel
 
 import (
+	"fmt"
 	"maps"
 	"sort"
 )
@@ -118,13 +119,17 @@ func installContextFunctions(prelude *Prelude) {
 		return Null, nil
 	}).Required("context", "key").Alias("context", "m"))
 
-	prelude.Bind("get entries", wrapTyped(func(ctx map[string]any) ([](map[string]any), error) {
+	prelude.Bind("get entries", NewNativeFunc(func(kwargs map[string]any) (any, error) {
+		ctx, ok := kwargs["context"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("get entries: context must be a context value, got %T", kwargs["context"])
+		}
 		keys := make([]string, 0, len(ctx))
 		for k := range ctx {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		entries := make([](map[string]any), 0, len(keys))
+		entries := make([]any, 0, len(keys))
 		for _, k := range keys {
 			entries = append(entries, map[string]any{
 				"key":   k,

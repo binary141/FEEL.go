@@ -757,6 +757,20 @@ func (p *Parser) parseName(stopKeywords ...string) (string, error) {
 func (p *Parser) parseBracketOrRange() (Node, error) {
 	textRange := p.startTextRange()
 	p.scanner.Next()
+	if p.CurrentToken().Expect(">", ">=", "<", "<=", "!=", "=") {
+		op := p.CurrentToken().Kind
+		p.scanner.Next()
+		val, err := p.expression()
+		if err != nil {
+			return nil, err
+		}
+		if !p.CurrentToken().Expect(")") {
+			return nil, p.Unexpected(")")
+		}
+		p.scanner.Next()
+		textRange.End = p.CurrentToken().Pos
+		return &UnaryTestValueNode{Op: op, Value: val, textRange: textRange}, nil
+	}
 	c, err := p.expression()
 	if err != nil {
 		return nil, err
@@ -891,10 +905,18 @@ func (p *Parser) parseStringNode() (Node, error) {
 	return &StringNode{Value: v, textRange: rng}, nil
 }
 
+// mapKeyExtraSymbols lists the operator/punctuation tokens that FEEL
+// permits inside a context entry key name (e.g. `{foo+bar: "foo"}`) as
+// long as they are not separated from the surrounding name parts by
+// whitespace.
+var mapKeyExtraSymbols = map[string]bool{
+	"+": true, "-": true, "*": true, "/": true, "**": true, "%": true, ".": true, "'": true,
+}
+
 func (p *Parser) parseMapKey() (string, error) {
 	switch p.CurrentToken().Kind {
 	case TokenName:
-		return p.parseName()
+		return p.parseMapKeyName()
 	case TokenString:
 		node, err := p.parseStringNode()
 		if err != nil {
@@ -904,6 +926,36 @@ func (p *Parser) parseMapKey() (string, error) {
 	default:
 		return "", p.Unexpected(TokenName, TokenString)
 	}
+}
+
+// parseMapKeyName parses a context entry key, which is normally a
+// whitespace-separated multi-word name (`foo bar`) but may also embed
+// operator symbols directly adjacent to name parts (`foo+bar`), per the
+// FEEL grammar's "extra chars permitted in name" allowance.
+func (p *Parser) parseMapKeyName() (string, error) {
+	var sb strings.Builder
+	var prevPos ScanPosition
+	var prevLen int
+	first := true
+	for {
+		tok := p.CurrentToken()
+		isNamePart := tok.Kind == TokenName || tok.Kind == TokenKeyword || mapKeyExtraSymbols[tok.Kind]
+		if !isNamePart {
+			break
+		}
+		if !first && tok.Pos.Row == prevPos.Row && tok.Pos.Column != prevPos.Column+prevLen {
+			sb.WriteString(" ")
+		}
+		sb.WriteString(tok.Value)
+		prevPos = tok.Pos
+		prevLen = len(tok.Value)
+		first = false
+		p.scanner.Next()
+	}
+	if sb.Len() == 0 {
+		return "", p.Unexpected(TokenName)
+	}
+	return sb.String(), nil
 }
 
 func (p *Parser) parseTemporalNode() (Node, error) {

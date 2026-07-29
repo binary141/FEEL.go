@@ -113,7 +113,7 @@ func ParseTime(temporalStr string) (*FEELTime, error) {
 			if loc, err := time.LoadLocation(tzName); err == nil {
 				for _, pat := range []string{"15:04:05.999999999", "15:04:05"} {
 					if t, err := time.ParseInLocation(pat, timePart, loc); err == nil {
-						return &FEELTime{t: t, zoneKind: zoneNamed, zoneName: tzName}, nil
+						return &FEELTime{t: t.Truncate(time.Millisecond), zoneKind: zoneNamed, zoneName: tzName}, nil
 					}
 				}
 			}
@@ -126,7 +126,7 @@ func ParseTime(temporalStr string) (*FEELTime, error) {
 				return nil, ErrParseTemporal
 			}
 			kind, name := classifyZone(temporalStr)
-			return &FEELTime{t: t, zoneKind: kind, zoneName: name}, nil
+			return &FEELTime{t: t.Truncate(time.Millisecond), zoneKind: kind, zoneName: name}, nil
 		}
 	}
 	return nil, ErrParseTemporal
@@ -399,7 +399,7 @@ func parseLargeYearDatetime(s string, loc *time.Location) (time.Time, bool) {
 		}
 		nsec, _ = strconv.Atoi(frac)
 	}
-	t := time.Date(year, time.Month(month), day, hour, min, sec, nsec, loc)
+	t := time.Date(year, time.Month(month), day, hour, min, sec, nsec, loc).Truncate(time.Millisecond)
 	if t.Year() != year || int(t.Month()) != month || t.Day() != day {
 		return time.Time{}, false
 	}
@@ -434,11 +434,11 @@ func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 			if loc, err := time.LoadLocation(tzName); err == nil {
 				for _, pat := range []string{"2006-01-02T15:04:05.999999999", "2006-01-02T15:04:05"} {
 					if t, err := time.ParseInLocation(pat, dtPart, loc); err == nil {
-						return &FEELDatetime{t: t, zoneKind: zoneNamed, zoneName: tzName}, nil
+						return &FEELDatetime{t: t.Truncate(time.Millisecond), zoneKind: zoneNamed, zoneName: tzName}, nil
 					}
 				}
 				if t, ok := parseLargeYearDatetime(dtPart, loc); ok {
-					return &FEELDatetime{t: t, zoneKind: zoneNamed, zoneName: tzName}, nil
+					return &FEELDatetime{t: t.Truncate(time.Millisecond), zoneKind: zoneNamed, zoneName: tzName}, nil
 				}
 			}
 			return nil, ErrParseTemporal
@@ -450,7 +450,7 @@ func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 				return nil, ErrParseTemporal
 			}
 			kind, name := classifyZone(temporalStr)
-			return &FEELDatetime{t: t, zoneKind: kind, zoneName: name}, nil
+			return &FEELDatetime{t: t.Truncate(time.Millisecond), zoneKind: kind, zoneName: name}, nil
 		}
 	}
 	return nil, ErrParseTemporal

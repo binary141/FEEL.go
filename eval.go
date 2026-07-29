@@ -321,6 +321,26 @@ func (node RangeNode) Eval(intp *Interpreter) (any, error) {
 	}, nil
 }
 
+// UnaryTestValue is the runtime value of a parenthesised unary test used
+// as a value, e.g. `(< 10)`. It's only comparable to other UnaryTestValues
+// with the same operator.
+type UnaryTestValue struct {
+	Op    string
+	Value any
+}
+
+func (utv UnaryTestValue) String() string {
+	return fmt.Sprintf("(%s%v)", utv.Op, utv.Value)
+}
+
+func (node UnaryTestValueNode) Eval(intp *Interpreter) (any, error) {
+	val, err := node.Value.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	return &UnaryTestValue{Op: node.Op, Value: val}, nil
+}
+
 func (node ArrayNode) Eval(intp *Interpreter) (any, error) {
 	var arr []any
 	for _, elem := range node.Elements {

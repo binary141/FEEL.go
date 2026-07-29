@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 func timeIsEqual(ta HasTime, kindA int, nameA string, tb HasTime, kindB int, nameB string) bool {
@@ -442,7 +443,7 @@ func installBuiltinFunctions(prelude *Prelude) {
 
 	// string functions
 	prelude.Bind("string length", wrapTyped(func(s string) (int, error) {
-		return len(s), nil
+		return utf8.RuneCountInString(s), nil
 	}).Required("string"))
 
 	prelude.Bind("substring", NewNativeFunc(func(kwargs map[string]any) (any, error) {
@@ -456,7 +457,8 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err := decodeKWArgs(kwargs, &args); err != nil {
 			return nil, err
 		}
-		strLen := len(args.Str)
+		runes := []rune(args.Str)
+		strLen := len(runes)
 		rawStart := args.StartPos.Int()
 		var startPos int
 		if rawStart < 0 {
@@ -474,7 +476,7 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if args.Length != nil {
 			endPos = min(startPos+int(args.Length.Int64()), strLen)
 		}
-		subs := args.Str[startPos:endPos]
+		subs := string(runes[startPos:endPos])
 		return subs, nil
 	}).Required("string", "start position").Optional("length"))
 

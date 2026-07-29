@@ -3,8 +3,17 @@ package feel
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 )
+
+func isRangeOrUnaryTest(v any) bool {
+	switch v.(type) {
+	case *RangeValue, *UnaryTestValue:
+		return true
+	}
+	return false
+}
 
 func (binop Binop) Eval(intp *Interpreter) (any, error) {
 	switch binop.Op {
@@ -153,6 +162,10 @@ func compareInterfaces(leftVal, rightVal any) (int, error) {
 				return cmpStart, nil
 			}
 			return compareInterfaces(v.End, rightRange.End)
+		}
+	case *UnaryTestValue:
+		if rightUT, ok := rightVal.(*UnaryTestValue); ok && v.Op == rightUT.Op {
+			return compareInterfaces(v.Value, rightUT.Value)
 		}
 	}
 	return 0, NewEvalError(-3106, "invalid types", fmt.Sprintf("bad type in comparation, %T vs. %T", leftVal, rightVal))
@@ -507,6 +520,14 @@ func (binop Binop) equalOp(intp *Interpreter) (any, error) {
 	// values of incompatible types is "unknown" (null).
 	if leftNull != rightNull {
 		return false, nil
+	}
+	// Ranges and parenthesised unary-test values are structurally
+	// distinct kinds; comparing one against a different concrete type
+	// (including each other) is a definite inequality, not "unknown".
+	if isRangeOrUnaryTest(leftVal) || isRangeOrUnaryTest(rightVal) {
+		if reflect.TypeOf(leftVal) != reflect.TypeOf(rightVal) {
+			return false, nil
+		}
 	}
 	r, err := compareInterfaces(leftVal, rightVal)
 	if err != nil {

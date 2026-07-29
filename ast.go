@@ -2,6 +2,7 @@ package feel
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -185,10 +186,81 @@ func (node StringNode) TextRange() TextRange {
 func (node StringNode) Content() string {
 	// trim leading and trailing quotes
 	s := node.Value[1 : len(node.Value)-1]
+	return unescapeFeelString(s)
+}
 
-	s = strings.ReplaceAll(s, "\\n", "\n")
-	s = strings.ReplaceAll(s, "\\\"", "\"")
-	return s
+// unescapeFeelString processes FEEL string escape sequences: \n \r \t \" \'
+// \\, the 4-hex-digit \uXXXX form (including UTF-16 surrogate pairs for
+// codepoints beyond the BMP), and the 6-hex-digit \UXXXXXX form for a full
+// unicode codepoint.
+func unescapeFeelString(s string) string {
+	runes := []rune(s)
+	var sb strings.Builder
+	sb.Grow(len(s))
+	i := 0
+	for i < len(runes) {
+		c := runes[i]
+		if c == '\\' && i+1 < len(runes) {
+			switch runes[i+1] {
+			case 'n':
+				sb.WriteByte('\n')
+				i += 2
+				continue
+			case 'r':
+				sb.WriteByte('\r')
+				i += 2
+				continue
+			case 't':
+				sb.WriteByte('\t')
+				i += 2
+				continue
+			case '"':
+				sb.WriteByte('"')
+				i += 2
+				continue
+			case '\'':
+				sb.WriteByte('\'')
+				i += 2
+				continue
+			case '\\':
+				sb.WriteByte('\\')
+				i += 2
+				continue
+			case 'u':
+				if i+6 <= len(runes) {
+					if code, err := strconv.ParseUint(string(runes[i+2:i+6]), 16, 32); err == nil {
+						r1 := rune(code)
+						if r1 >= 0xD800 && r1 <= 0xDBFF && i+12 <= len(runes) &&
+							runes[i+6] == '\\' && runes[i+7] == 'u' {
+							if code2, err2 := strconv.ParseUint(string(runes[i+8:i+12]), 16, 32); err2 == nil {
+								r2 := rune(code2)
+								if r2 >= 0xDC00 && r2 <= 0xDFFF {
+									combined := ((r1 - 0xD800) << 10) + (r2 - 0xDC00) + 0x10000
+									sb.WriteRune(combined)
+									i += 12
+									continue
+								}
+							}
+						}
+						sb.WriteRune(r1)
+						i += 6
+						continue
+					}
+				}
+			case 'U':
+				if i+8 <= len(runes) {
+					if code, err := strconv.ParseUint(string(runes[i+2:i+8]), 16, 32); err == nil {
+						sb.WriteRune(rune(code))
+						i += 8
+						continue
+					}
+				}
+			}
+		}
+		sb.WriteRune(c)
+		i++
+	}
+	return sb.String()
 }
 
 // Map
@@ -257,6 +329,24 @@ func (node RangeNode) Repr() string {
 		endQuote = ")"
 	}
 	return fmt.Sprintf("%s%s..%s%s", startQuote, node.Start.Repr(), node.End.Repr(), endQuote)
+}
+
+// UnaryTestValueNode represents a parenthesised unary test used as a
+// value, e.g. `(< 10)` or `(=10)`. These aren't evaluated against an
+// implicit `?`; they evaluate to a comparable UnaryTestValue so that
+// expressions like `(< 10) = (< 10)` can be checked for equality.
+type UnaryTestValueNode struct {
+	Op    string
+	Value Node
+
+	textRange TextRange
+}
+
+func (node UnaryTestValueNode) TextRange() TextRange {
+	return node.textRange
+}
+func (node UnaryTestValueNode) Repr() string {
+	return fmt.Sprintf("(%s%s)", node.Op, node.Value.Repr())
 }
 
 // if expression
