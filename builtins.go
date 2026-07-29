@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cockroachdb/apd/v3"
+	"github.com/dlclark/regexp2"
 	"github.com/mitchellh/mapstructure"
 	"math"
 	"regexp"
@@ -121,6 +122,136 @@ func regexInlineFlags(flags string) (string, error) {
 		return "", nil
 	}
 	return "(?" + goFlags + ")", nil
+}
+
+var basicLatinBlockPattern = regexp.MustCompile(`\\([pP])\{IsBasicLatin\}`)
+
+// isFeelRegexSpace reports whether r is whitespace that the "x" (free-
+// spacing) regex flag strips from a pattern.
+func isFeelRegexSpace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+}
+
+// stripFeelRegexWhitespace implements the "x" flag's free-spacing mode:
+// whitespace outside a "[...]" character class is removed, including
+// whitespace immediately following a backslash (so "\ " next to a letter
+// collapses into that letter's escape, e.g. "\ s" becomes "\s"). Whitespace
+// inside a character class is preserved verbatim.
+func stripFeelRegexWhitespace(pattern string) string {
+	var b strings.Builder
+	runes := []rune(pattern)
+	inClass := false
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == '\\' && i+1 < len(runes) {
+			next := runes[i+1]
+			b.WriteRune(r)
+			if !inClass && isFeelRegexSpace(next) {
+				i++
+				continue
+			}
+			b.WriteRune(next)
+			i++
+			continue
+		}
+		if r == '[' {
+			inClass = true
+			b.WriteRune(r)
+			continue
+		}
+		if r == ']' {
+			inClass = false
+			b.WriteRune(r)
+			continue
+		}
+		if !inClass && isFeelRegexSpace(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// rewriteFeelRegex walks pattern tracking character-class boundaries to:
+//   - reject back-references ("\1", "\0", ...) used inside a character
+//     class, which XPath/XQuery regexes (unlike Perl-derived engines)
+//     don't permit there.
+//   - replace an unescaped, unbracketed "." with a class that excludes
+//     both "\n" and "\r", matching XPath's definition of "." (Go's
+//     regexp2 dependency, like most PCRE-style engines, excludes only
+//     "\n" by default). Skipped when singleline is true, since dot-all
+//     mode already matches every character.
+func rewriteFeelRegex(pattern string, singleline bool) (string, error) {
+	var b strings.Builder
+	runes := []rune(pattern)
+	inClass := false
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == '\\' && i+1 < len(runes) {
+			next := runes[i+1]
+			if inClass && next >= '0' && next <= '9' {
+				return "", fmt.Errorf("back-reference not allowed inside a character class")
+			}
+			b.WriteRune(r)
+			b.WriteRune(next)
+			i++
+			continue
+		}
+		if r == '[' {
+			inClass = true
+			b.WriteRune(r)
+			continue
+		}
+		if r == ']' {
+			inClass = false
+			b.WriteRune(r)
+			continue
+		}
+		if r == '.' && !inClass && !singleline {
+			b.WriteString(`[^\n\r]`)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String(), nil
+}
+
+// feelRegexPreprocess translates a FEEL matches()/replace() pattern and
+// flags string into a pattern and option set for the regexp2 engine.
+// regexp2 is used instead of the standard library's RE2-based regexp
+// because FEEL's matches() follows XPath/XQuery regex semantics, which
+// require back-reference support that RE2 cannot provide at all.
+func feelRegexPreprocess(pattern, flags string) (string, regexp2.RegexOptions, error) {
+	var opts regexp2.RegexOptions
+	singleline := false
+	for _, f := range flags {
+		switch f {
+		case 'i':
+			opts |= regexp2.IgnoreCase
+		case 'm':
+			opts |= regexp2.Multiline
+		case 's':
+			opts |= regexp2.Singleline
+			singleline = true
+		case 'x':
+			pattern = stripFeelRegexWhitespace(pattern)
+		default:
+			return "", 0, fmt.Errorf("invalid regex flag %q", f)
+		}
+	}
+
+	pattern = basicLatinBlockPattern.ReplaceAllStringFunc(pattern, func(m string) string {
+		if strings.HasPrefix(m, `\p`) {
+			return `[\x00-\x7F]`
+		}
+		return `[^\x00-\x7F]`
+	})
+
+	pattern, err := rewriteFeelRegex(pattern, singleline)
+	if err != nil {
+		return "", 0, err
+	}
+	return pattern, opts, nil
 }
 
 // dropNullArgs removes the given keys from kwargs when their value is
@@ -573,15 +704,19 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err := decodeKWArgs(dropNullArgs(kwargs, "flags"), &args); err != nil {
 			return nil, err
 		}
-		inlineFlags, err := regexInlineFlags(args.Flags)
+		pattern, opts, err := feelRegexPreprocess(args.Pattern, args.Flags)
 		if err != nil {
 			return Null, nil
 		}
-		re, err := regexp.Compile(inlineFlags + args.Pattern)
+		re, err := regexp2.Compile(pattern, opts)
 		if err != nil {
-			return false, nil
+			return Null, nil
 		}
-		return re.MatchString(args.Input), nil
+		matched, err := re.MatchString(args.Input)
+		if err != nil {
+			return Null, nil
+		}
+		return matched, nil
 	}).Required("input", "pattern").Optional("flags"))
 
 	prelude.Bind("replace", NewNativeFunc(func(kwargs map[string]any) (any, error) {
