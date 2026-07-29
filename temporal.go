@@ -136,7 +136,7 @@ func ParseTime(temporalStr string) (*FEELTime, error) {
 			if loc, err := time.LoadLocation(tzName); err == nil {
 				for _, pat := range []string{"15:04:05.999999999", "15:04:05"} {
 					if t, err := time.ParseInLocation(pat, timePart, loc); err == nil {
-						return &FEELTime{t: t.Truncate(time.Millisecond), zoneKind: zoneNamed, zoneName: tzName}, nil
+						return &FEELTime{t: t, zoneKind: zoneNamed, zoneName: tzName}, nil
 					}
 				}
 			}
@@ -149,7 +149,7 @@ func ParseTime(temporalStr string) (*FEELTime, error) {
 				return nil, ErrParseTemporal
 			}
 			kind, name := classifyZone(temporalStr)
-			return &FEELTime{t: t.Truncate(time.Millisecond), zoneKind: kind, zoneName: name}, nil
+			return &FEELTime{t: t, zoneKind: kind, zoneName: name}, nil
 		}
 	}
 	return nil, ErrParseTemporal
@@ -391,8 +391,36 @@ var dateTimePatterns = []string{
 	"2006-01-02T15:04:05",
 }
 
-// largeYearDTRe matches datetime strings with 4-9 digit years (no timezone — used for IANA path).
-var largeYearDTRe = regexp.MustCompile(`^(\d{4,9})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$`)
+// largeYearDTRe matches datetime strings with 4-9 digit years, with an
+// optional trailing "Z"/numeric-offset suffix (no named "@zone" - that's
+// handled separately via the IANA path).
+var largeYearDTRe = regexp.MustCompile(`^(\d{4,9})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2}(?::\d{2})?)?$`)
+
+// parseLargeYearOffsetDatetime parses a large-year datetime string,
+// deriving its location from a trailing "Z"/numeric-offset suffix if
+// present (defaulting to UTC otherwise).
+func parseLargeYearOffsetDatetime(s string) (time.Time, bool) {
+	m := largeYearDTRe.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, false
+	}
+	loc := time.UTC
+	if offsetStr := m[8]; offsetStr != "" && offsetStr != "Z" {
+		sign := 1
+		if offsetStr[0] == '-' {
+			sign = -1
+		}
+		parts := strings.Split(offsetStr[1:], ":")
+		hh, _ := strconv.Atoi(parts[0])
+		mm, _ := strconv.Atoi(parts[1])
+		ss := 0
+		if len(parts) > 2 {
+			ss, _ = strconv.Atoi(parts[2])
+		}
+		loc = time.FixedZone("", sign*(hh*3600+mm*60+ss))
+	}
+	return parseLargeYearDatetime(s, loc)
+}
 
 func parseLargeYearDatetime(s string, loc *time.Location) (time.Time, bool) {
 	m := largeYearDTRe.FindStringSubmatch(s)
@@ -422,7 +450,7 @@ func parseLargeYearDatetime(s string, loc *time.Location) (time.Time, bool) {
 		}
 		nsec, _ = strconv.Atoi(frac)
 	}
-	t := time.Date(year, time.Month(month), day, hour, min, sec, nsec, loc).Truncate(time.Millisecond)
+	t := time.Date(year, time.Month(month), day, hour, min, sec, nsec, loc)
 	if t.Year() != year || int(t.Month()) != month || t.Day() != day {
 		return time.Time{}, false
 	}
@@ -478,11 +506,15 @@ func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 			if loc, err := time.LoadLocation(tzName); err == nil {
 				for _, pat := range []string{"2006-01-02T15:04:05.999999999", "2006-01-02T15:04:05"} {
 					if t, err := time.ParseInLocation(pat, dtPart, loc); err == nil {
-						return &FEELDatetime{t: t.Truncate(time.Millisecond), zoneKind: zoneNamed, zoneName: tzName}, nil
+						return &FEELDatetime{t: t, zoneKind: zoneNamed, zoneName: tzName}, nil
 					}
 				}
-				if t, ok := parseLargeYearDatetime(dtPart, loc); ok {
-					return &FEELDatetime{t: t.Truncate(time.Millisecond), zoneKind: zoneNamed, zoneName: tzName}, nil
+				// A numeric offset combined with a named zone (e.g.
+				// "...+01:00@Europe/Paris") is invalid.
+				if m := largeYearDTRe.FindStringSubmatch(dtPart); m == nil || m[8] == "" {
+					if t, ok := parseLargeYearDatetime(dtPart, loc); ok {
+						return &FEELDatetime{t: t, zoneKind: zoneNamed, zoneName: tzName}, nil
+					}
 				}
 			}
 			return nil, ErrParseTemporal
@@ -494,8 +526,16 @@ func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 				return nil, ErrParseTemporal
 			}
 			kind, name := classifyZone(temporalStr)
-			return &FEELDatetime{t: t.Truncate(time.Millisecond), zoneKind: kind, zoneName: name}, nil
+			return &FEELDatetime{t: t, zoneKind: kind, zoneName: name}, nil
 		}
+	}
+	// years outside the 4-digit range Go's time.Parse layouts require
+	if t, ok := parseLargeYearOffsetDatetime(temporalStr); ok {
+		if !validOffsetSeconds(t) {
+			return nil, ErrParseTemporal
+		}
+		kind, name := classifyZone(temporalStr)
+		return &FEELDatetime{t: t, zoneKind: kind, zoneName: name}, nil
 	}
 	return nil, ErrParseTemporal
 }
@@ -1058,7 +1098,7 @@ func installDatetimeFunctions(prelude *Prelude) {
 		t := feelTime.t
 		combined := time.Date(d.Year(), d.Month(), d.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
 		return &FEELDatetime{t: combined, zoneKind: feelTime.zoneKind, zoneName: feelTime.zoneName}, nil
-	}).Optional("from", "time").Vararg("__extra"))
+	}).Optional("from", "time").Alias("from", "date").Vararg("__extra"))
 
 	prelude.Bind("duration", wrapTyped(func(frm string) (any, error) {
 		return ParseDuration(frm)
