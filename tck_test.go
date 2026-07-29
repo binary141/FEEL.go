@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,9 +29,37 @@ const tckComplianceLevel3Dir = "tck/TestCases/compliance-level-3"
 // ---- DMN model (subset of the schema we care about) ----
 
 type tckDMNDefinitions struct {
-	Decisions []tckDMNDecision `xml:"decision"`
-	BKMs      []tckDMNBKM      `xml:"businessKnowledgeModel"`
-	Inputs    []tckDMNInput    `xml:"inputData"`
+	Namespace string                 `xml:"namespace,attr"`
+	Decisions []tckDMNDecision       `xml:"decision"`
+	BKMs      []tckDMNBKM            `xml:"businessKnowledgeModel"`
+	Inputs    []tckDMNInput          `xml:"inputData"`
+	ItemDefs  []tckDMNItemDefinition `xml:"itemDefinition"`
+	Imports   []tckDMNImport         `xml:"import"`
+}
+
+// tckDMNImport is a DMN cross-model import: FEEL text in the importing
+// model refers to the imported model's decisions/inputs via
+// "<Name>.<decision or input name>" dotted access.
+type tckDMNImport struct {
+	Name      string `xml:"name,attr"`
+	Namespace string `xml:"namespace,attr"`
+}
+
+// tckDMNItemDefinition is a DMN custom type declaration (name -> either a
+// base typeRef, a collection of a typeRef, or a set of named
+// itemComponents forming a context/struct type). allowedValues is
+// intentionally not modeled: FEEL's "instance of" type conformance does
+// not take allowedValues restrictions into account.
+type tckDMNItemDefinition struct {
+	Name           string                `xml:"name,attr"`
+	TypeRef        string                `xml:"typeRef"`
+	IsCollection   bool                  `xml:"isCollection,attr"`
+	ItemComponents []tckDMNItemComponent `xml:"itemComponent"`
+}
+
+type tckDMNItemComponent struct {
+	Name    string `xml:"name,attr"`
+	TypeRef string `xml:"typeRef"`
 }
 
 type tckDMNHref struct {
@@ -38,7 +67,13 @@ type tckDMNHref struct {
 }
 
 func (h tckDMNHref) id() string {
-	return strings.TrimPrefix(h.Href, "#")
+	// hrefs are either a bare local reference ("#_id") or a fully
+	// qualified one ("http://.../namespace#_id"); the id is always the
+	// part after the last '#'.
+	if idx := strings.LastIndex(h.Href, "#"); idx >= 0 {
+		return h.Href[idx+1:]
+	}
+	return h.Href
 }
 
 type tckDMNInfoReq struct {
@@ -328,13 +363,56 @@ func deepValuesEqual(want, actual any) bool {
 // ---- test model loading ----
 
 type tckModel struct {
-	folder      string
-	dmn         tckDMNDefinitions
-	tests       tckTestCases
-	idToName    map[string]string
-	decisionsBy map[string]tckDMNDecision
-	bkmsBy      map[string]tckDMNBKM
-	unsupported string // reason, if non-empty this whole model is skipped
+	folder       string
+	dmn          tckDMNDefinitions
+	tests        tckTestCases
+	idToName     map[string]string
+	decisionsBy  map[string]tckDMNDecision
+	bkmsBy       map[string]tckDMNBKM
+	itemTypeText map[string]string // custom type name -> FEEL instance-of descriptor text
+	unsupported  string            // reason, if non-empty this whole model is skipped
+}
+
+// resolveItemDefType expands a DMN itemDefinition name (or builtin typeRef)
+// into the FEEL "instance of" type-descriptor text FEEL.go understands
+// (e.g. "list<number>", "context<a: string, b: string>"). allowedValues
+// restrictions are deliberately ignored, matching FEEL's instance-of
+// semantics. visiting guards against cyclic itemDefinition references.
+func resolveItemDefType(name string, defs map[string]tckDMNItemDefinition, visiting map[string]bool) string {
+	def, ok := defs[name]
+	if !ok {
+		// Not a custom type: either a builtin FEEL type name (number,
+		// string, boolean, Any, ...) or an unresolvable reference, either
+		// way pass it through unchanged.
+		return name
+	}
+	if visiting[name] {
+		return name
+	}
+	visiting[name] = true
+	defer delete(visiting, name)
+
+	if def.IsCollection {
+		return "list<" + resolveItemDefType(def.TypeRef, defs, visiting) + ">"
+	}
+	if len(def.ItemComponents) > 0 {
+		parts := make([]string, len(def.ItemComponents))
+		for i, c := range def.ItemComponents {
+			parts[i] = c.Name + ": " + resolveItemDefType(c.TypeRef, defs, visiting)
+		}
+		return "context<" + strings.Join(parts, ", ") + ">"
+	}
+	return resolveItemDefType(def.TypeRef, defs, visiting)
+}
+
+// substituteCustomTypes rewrites references to DMN custom (itemDefinition)
+// type names within a FEEL expression into FEEL.go's built-in instance-of
+// syntax, so e.g. "256 instance of t255" becomes "256 instance of number".
+func (m *tckModel) substituteCustomTypes(text string) string {
+	for name, resolved := range m.itemTypeText {
+		text = regexp.MustCompile(`\b`+regexp.QuoteMeta(name)+`\b`).ReplaceAllString(text, resolved)
+	}
+	return text
 }
 
 func loadTCKModel(dir string) (*tckModel, error) {
@@ -342,12 +420,19 @@ func loadTCKModel(dir string) (*tckModel, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The primary model file shares its base name with the folder; other
+	// .dmn files present are models it imports, not the model under test.
+	primaryDMNName := filepath.Base(dir) + ".dmn"
 	var dmnFile, testFile string
 	for _, e := range entries {
 		name := e.Name()
 		switch {
-		case strings.HasSuffix(name, ".dmn"):
+		case name == primaryDMNName:
 			dmnFile = filepath.Join(dir, name)
+		case strings.HasSuffix(name, ".dmn"):
+			if dmnFile == "" {
+				dmnFile = filepath.Join(dir, name)
+			}
 		case strings.Contains(name, "-test-") && strings.HasSuffix(name, ".xml"):
 			// only take the first test file if several exist
 			if testFile == "" {
@@ -399,6 +484,17 @@ func loadTCKModel(dir string) (*tckModel, error) {
 		}
 	}
 
+	if len(m.dmn.ItemDefs) > 0 {
+		defs := make(map[string]tckDMNItemDefinition, len(m.dmn.ItemDefs))
+		for _, def := range m.dmn.ItemDefs {
+			defs[def.Name] = def
+		}
+		m.itemTypeText = make(map[string]string, len(defs))
+		for name := range defs {
+			m.itemTypeText[name] = resolveItemDefType(name, defs, map[string]bool{})
+		}
+	}
+
 	return m, nil
 }
 
@@ -433,6 +529,126 @@ func TestTCKComplianceLevel3(t *testing.T) {
 // any decisions it requires as inputs (per its informationRequirements) and
 // binding their results into scope. Results are memoized directly in scope
 // so sibling result nodes in the same test case reuse them.
+// findDMNFileByNamespace locates the .dmn file in dir whose root
+// "namespace" attribute matches the given namespace (used to resolve
+// cross-model <import> references to the file that defines them).
+func findDMNFileByNamespace(dir, namespace string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".dmn") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		b, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var probe struct {
+			Namespace string `xml:"namespace,attr"`
+		}
+		if err := xml.Unmarshal(b, &probe); err != nil {
+			continue
+		}
+		if probe.Namespace == namespace {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("no .dmn file in %s with namespace %q", dir, namespace)
+}
+
+// buildImportedScope loads the model in dir whose namespace matches
+// namespace, evaluates all of its (supported) decisions, and returns a
+// Scope holding those decision results plus its own bound inputs and
+// BKM functions - so a dotted reference "<import name>.<decision name>"
+// in the importing model's FEEL text resolves via ordinary context
+// attribute access. Imports of the imported model are themselves
+// resolved recursively and bound the same way. inputValues supplies
+// input values by (unqualified) name, shared across the whole import
+// graph - the TCK test cases in this suite give every input a globally
+// unique name regardless of which model declares it.
+func buildImportedScope(dir, namespace string, inputValues Scope, visiting map[string]bool) (Scope, error) {
+	if visiting[namespace] {
+		return nil, fmt.Errorf("cyclic import of namespace %q", namespace)
+	}
+	visiting[namespace] = true
+	defer delete(visiting, namespace)
+
+	path, err := findDMNFileByNamespace(dir, namespace)
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var dmn tckDMNDefinitions
+	if err := xml.Unmarshal(b, &dmn); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+
+	scope := Scope{}
+	for _, in := range dmn.Inputs {
+		if v, ok := inputValues[in.Name]; ok {
+			scope[in.Name] = v
+		}
+	}
+	for _, bkm := range dmn.BKMs {
+		if !bkm.supported() {
+			continue
+		}
+		ast, err := ParseString(bkm.funcText())
+		if err != nil {
+			return nil, fmt.Errorf("parsing BKM %q: %w", bkm.Name, err)
+		}
+		intp := NewIntepreter()
+		fn, err := ast.Eval(intp)
+		if err != nil {
+			return nil, fmt.Errorf("binding BKM %q: %w", bkm.Name, err)
+		}
+		scope[bkm.Name] = fn
+	}
+	for _, imp := range dmn.Imports {
+		importedScope, err := buildImportedScope(dir, imp.Namespace, inputValues, visiting)
+		if err != nil {
+			return nil, err
+		}
+		scope[imp.Name] = map[string]any(importedScope)
+	}
+
+	sub := &tckModel{
+		folder:      dir,
+		dmn:         dmn,
+		idToName:    make(map[string]string),
+		decisionsBy: make(map[string]tckDMNDecision),
+	}
+	for _, d := range dmn.Decisions {
+		sub.idToName[d.ID] = d.Name
+		sub.decisionsBy[d.Name] = d
+	}
+	if len(dmn.ItemDefs) > 0 {
+		defs := make(map[string]tckDMNItemDefinition, len(dmn.ItemDefs))
+		for _, def := range dmn.ItemDefs {
+			defs[def.Name] = def
+		}
+		sub.itemTypeText = make(map[string]string, len(defs))
+		for name := range defs {
+			sub.itemTypeText[name] = resolveItemDefType(name, defs, map[string]bool{})
+		}
+	}
+	for _, d := range dmn.Decisions {
+		if !d.supported() {
+			continue
+		}
+		if _, err := evalDecision(sub, d.Name, scope, map[string]bool{}); err != nil {
+			return nil, fmt.Errorf("decision %q: %w", d.Name, err)
+		}
+	}
+	return scope, nil
+}
+
 func evalDecision(m *tckModel, name string, scope Scope, visiting map[string]bool) (any, error) {
 	if v, ok := scope[name]; ok {
 		return v, nil
@@ -449,7 +665,14 @@ func evalDecision(m *tckModel, name string, scope Scope, visiting map[string]boo
 
 	for _, ir := range d.InfoReqs {
 		if ir.RequiredDecision != nil {
-			depName := m.idToName[ir.RequiredDecision.id()]
+			// A required decision that isn't in this model belongs to an
+			// imported model; its value is already available via the
+			// qualified "<import name>.<decision name>" dotted access
+			// bound into scope, so there's nothing to pre-evaluate here.
+			depName, ok := m.idToName[ir.RequiredDecision.id()]
+			if !ok {
+				continue
+			}
 			if _, err := evalDecision(m, depName, scope, visiting); err != nil {
 				return nil, fmt.Errorf("required decision %q: %w", depName, err)
 			}
@@ -458,7 +681,7 @@ func evalDecision(m *tckModel, name string, scope Scope, visiting map[string]boo
 
 	intp := NewIntepreter()
 	intp.Push(scope)
-	ast, err := ParseString(d.LitExpr.Text)
+	ast, err := ParseString(m.substituteCustomTypes(d.LitExpr.Text))
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
@@ -514,6 +737,14 @@ func runTCKSuite(t *testing.T, root string) {
 							t.Fatalf("input %q: %v", in.Name, err)
 						}
 						scope[in.Name] = val
+					}
+
+					for _, imp := range m.dmn.Imports {
+						importedScope, err := buildImportedScope(m.folder, imp.Namespace, scope, map[string]bool{})
+						if err != nil {
+							t.Fatalf("resolving import %q: %v", imp.Name, err)
+						}
+						scope[imp.Name] = map[string]any(importedScope)
 					}
 
 					for _, rn := range tc.ResultNode {

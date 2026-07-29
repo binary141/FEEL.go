@@ -464,8 +464,7 @@ func (p *Parser) unaryMinusOp() (Node, error) {
 			return nil, err
 		}
 		textRange.End = p.CurrentToken().Pos
-		zero := &NumberNode{Value: "0", textRange: textRange}
-		return &Binop{Op: "-", Left: zero, Right: right, textRange: textRange}, nil
+		return &NegateNode{Operand: right, textRange: textRange}, nil
 	}
 	return p.parseFuncallOrIndexOrDot()
 }
@@ -1033,6 +1032,30 @@ func (p *Parser) parseIfExpression() (Node, error) {
 
 }
 
+// parseIterationSource parses the value a "for"/"some"/"every" clause
+// iterates over: either a plain list-valued expression, or a bare
+// "start..end" range endpoint pair (no enclosing brackets), e.g.
+// "for i in 2..4 return i".
+func (p *Parser) parseIterationSource() (Node, error) {
+	rng := p.startTextRange()
+	first, err := p.expression()
+	if err != nil {
+		return nil, err
+	}
+	if p.CurrentToken().Kind != ".." {
+		return first, nil
+	}
+	p.scanner.Next()
+	p.inRangeEnd = true
+	end, err := p.expression()
+	p.inRangeEnd = false
+	if err != nil {
+		return nil, err
+	}
+	rng.End = p.CurrentToken().Pos
+	return &RangeNode{Start: first, End: end, IterationRange: true, textRange: rng}, nil
+}
+
 func (p *Parser) parseForExpr(chained bool) (Node, error) {
 	rng := p.startTextRange()
 	p.scanner.Next()
@@ -1046,7 +1069,7 @@ func (p *Parser) parseForExpr(chained bool) (Node, error) {
 	}
 	p.scanner.Next()
 
-	listExpr, err := p.expression()
+	listExpr, err := p.parseIterationSource()
 	if err != nil {
 		return nil, err
 	}
@@ -1100,7 +1123,7 @@ func (p *Parser) parseSomeOrEvery() (Node, error) {
 	}
 	p.scanner.Next()
 
-	listExpr, err := p.expression()
+	listExpr, err := p.parseIterationSource()
 	if err != nil {
 		return nil, err
 	}

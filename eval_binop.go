@@ -285,8 +285,16 @@ func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op
 		} else if op == "-" {
 			if rightDur, ok := rightVal.(*FEELDuration); ok {
 				return v.Add(rightDur.Negative()), nil
-			} else if rightTime, ok := rightVal.(HasTime); ok {
-				return v.Sub(rightTime), nil
+			} else if rightDT, ok := rightVal.(*FEELDatetime); ok {
+				if isZoned(v) != isZoned(rightDT) {
+					return Null, nil
+				}
+				return v.Sub(rightDT), nil
+			} else if rightDate, ok := rightVal.(*FEELDate); ok {
+				if !isZoned(v) {
+					return Null, nil
+				}
+				return v.Sub(rightDate), nil
 			}
 		}
 	case *FEELDate:
@@ -299,15 +307,26 @@ func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op
 				return v.Add(rightDur.Negative()), nil
 			} else if rightDate, ok := rightVal.(*FEELDate); ok {
 				return v.Sub(rightDate), nil
+			} else if rightDT, ok := rightVal.(*FEELDatetime); ok {
+				if !isZoned(rightDT) {
+					return Null, nil
+				}
+				return v.Sub(rightDT), nil
 			}
 		}
 	case *FEELTime:
 		if op == "+" {
 			if rightDur, ok := rightVal.(*FEELDuration); ok {
+				if rightDur.IsYearMonth() {
+					return Null, nil
+				}
 				return v.Add(rightDur), nil
 			}
 		} else if op == "-" {
 			if rightDur, ok := rightVal.(*FEELDuration); ok {
+				if rightDur.IsYearMonth() {
+					return Null, nil
+				}
 				return v.Add(rightDur.Negative()), nil
 			} else if rightTime, ok := rightVal.(*FEELTime); ok {
 				return v.Sub(rightTime), nil
@@ -334,6 +353,9 @@ func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op
 				return rightDate.Add(v), nil
 			}
 			if rightTime, ok := rightVal.(*FEELTime); ok {
+				if v.IsYearMonth() {
+					return Null, nil
+				}
 				return rightTime.Add(v), nil
 			}
 			if rightDT, ok := rightVal.(*FEELDatetime); ok {

@@ -272,27 +272,108 @@ func (node InstanceOfNode) Eval(intp *Interpreter) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	expected := node.TypeName
+	return matchesInstanceOfType(val, node.TypeName), nil
+}
+
+// splitTopLevel splits s on sep, ignoring occurrences of sep nested inside
+// "<...>" (used for context<field: type, ...> and list<type> descriptors
+// produced by parseInstanceOfTypeExpr).
+func splitTopLevel(s string, sep byte) []string {
+	var parts []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case sep:
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
+}
+
+// matchesContextType checks val against a "field: type, field: type, ..."
+// descriptor (the contents of a context<...> instance-of type). Extra
+// fields present on val but not listed in the type are allowed; every
+// listed field must be present on val with a matching type.
+func matchesContextType(val any, inner string) bool {
+	m, ok := val.(map[string]any)
+	if !ok {
+		return false
+	}
+	inner = strings.TrimSpace(inner)
+	if inner == "" {
+		return true
+	}
+	for _, part := range splitTopLevel(inner, ',') {
+		idx := strings.Index(part, ":")
+		if idx < 0 {
+			return false
+		}
+		name := strings.TrimSpace(part[:idx])
+		fieldType := strings.TrimSpace(part[idx+1:])
+		fv, exists := m[name]
+		if !exists {
+			return false
+		}
+		// A null property value conforms to any declared field type: DMN
+		// context conformance treats a missing/null value as compatible.
+		if _, isNull := fv.(*NullValue); isNull {
+			continue
+		}
+		if !matchesInstanceOfType(fv, fieldType) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchesInstanceOfType implements the "instance of" operator against a
+// type descriptor string as produced by parseInstanceOfTypeExpr.
+func matchesInstanceOfType(val any, expected string) bool {
 	if expected == "Any" {
 		_, isNull := val.(*NullValue)
-		return !isNull, nil
+		return !isNull
 	}
 	if strings.HasPrefix(expected, "range<") {
 		rv, ok := val.(*RangeValue)
 		if !ok {
-			return false, nil
+			return false
 		}
-		return rangeElementTypeName(rv) == expected, nil
+		return rangeElementTypeName(rv) == expected
 	}
 	if expected == "years and months duration" || expected == "days and time duration" {
 		dur, ok := val.(*FEELDuration)
 		if !ok {
-			return false, nil
+			return false
 		}
-		return dur.IsYearMonth() == (expected == "years and months duration"), nil
+		return dur.IsYearMonth() == (expected == "years and months duration")
 	}
-	// list<...>, context<...>, function<...>->...: FEEL.go has no
-	// structural DMN type system, so only the outer kind is checked.
+	if strings.HasPrefix(expected, "list<") && strings.HasSuffix(expected, ">") {
+		lst, ok := val.([]any)
+		if !ok {
+			return false
+		}
+		inner := expected[len("list<") : len(expected)-1]
+		for _, item := range lst {
+			if !matchesInstanceOfType(item, inner) {
+				return false
+			}
+		}
+		return true
+	}
+	if strings.HasPrefix(expected, "context<") && strings.HasSuffix(expected, ">") {
+		return matchesContextType(val, expected[len("context<"):len(expected)-1])
+	}
+	// function<...>->...: FEEL.go has no structural function-signature
+	// checking, so only the outer kind is checked.
 	if idx := strings.IndexAny(expected, "<"); idx >= 0 {
 		expected = expected[:idx]
 	} else if idx := strings.Index(expected, " -> "); idx >= 0 {
@@ -301,7 +382,84 @@ func (node InstanceOfNode) Eval(intp *Interpreter) (any, error) {
 	if canonical, ok := typeNameAliases[expected]; ok {
 		expected = canonical
 	}
-	return typeName(val) == expected, nil
+	return typeName(val) == expected
+}
+
+// materializeIterationList resolves a "for"/"some"/"every" iteration
+// source into a concrete list of values. Alongside plain lists, FEEL
+// supports iterating directly over a numeric or date range endpoint pair
+// (e.g. "for i in 2..4 return i", ascending or descending, step 1/1 day,
+// inclusive of both endpoints).
+func materializeIterationList(val any) ([]any, error) {
+	if lst, ok := val.([]any); ok {
+		return lst, nil
+	}
+	rv, ok := val.(*RangeValue)
+	if !ok {
+		return nil, NewErrTypeMismatch("list")
+	}
+	switch start := rv.Start.(type) {
+	case *Number:
+		end, ok := rv.End.(*Number)
+		if !ok {
+			return nil, NewErrTypeMismatch("list")
+		}
+		if !rv.iterationRange && start.Cmp(end) > 0 {
+			return nil, errors.New("descending range literal is invalid")
+		}
+		one := N(1)
+		var out []any
+		if start.Cmp(end) <= 0 {
+			for n := start; n.Cmp(end) <= 0; n = n.Add(one) {
+				out = append(out, n)
+			}
+		} else {
+			for n := start; n.Cmp(end) >= 0; n = n.Sub(one) {
+				out = append(out, n)
+			}
+		}
+		return out, nil
+	case *FEELDate:
+		end, ok := rv.End.(*FEELDate)
+		if !ok {
+			return nil, NewErrTypeMismatch("list")
+		}
+		if !rv.iterationRange && start.Date().After(end.Date()) {
+			return nil, errors.New("descending range literal is invalid")
+		}
+		oneDay := &FEELDuration{Days: 1}
+		var out []any
+		if !start.Date().After(end.Date()) {
+			for d := start; !d.Date().After(end.Date()); d = d.Add(oneDay) {
+				out = append(out, d)
+			}
+		} else {
+			negOneDay := oneDay.Negative()
+			for d := start; !d.Date().Before(end.Date()); d = d.Add(negOneDay) {
+				out = append(out, d)
+			}
+		}
+		return out, nil
+	default:
+		return nil, NewErrTypeMismatch("list")
+	}
+}
+
+func (node NegateNode) Eval(intp *Interpreter) (any, error) {
+	v, err := node.Operand.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	switch vv := v.(type) {
+	case *Number:
+		return vv.Neg(), nil
+	case *FEELDuration:
+		return vv.Negative(), nil
+	default:
+		zero := valueNode{value: N(0), textRange: node.textRange}
+		operand := valueNode{value: v, textRange: node.textRange}
+		return (Binop{Op: "-", Left: zero, Right: operand, textRange: node.textRange}).Eval(intp)
+	}
 }
 
 func (node RangeNode) Eval(intp *Interpreter) (any, error) {
@@ -314,10 +472,11 @@ func (node RangeNode) Eval(intp *Interpreter) (any, error) {
 		return nil, err
 	}
 	return &RangeValue{
-		Start:     startVal,
-		StartOpen: node.StartOpen,
-		End:       endVal,
-		EndOpen:   node.EndOpen,
+		Start:          startVal,
+		StartOpen:      node.StartOpen,
+		End:            endVal,
+		EndOpen:        node.EndOpen,
+		iterationRange: node.IterationRange,
 	}, nil
 }
 
@@ -472,6 +631,11 @@ func (node ForExpr) Eval(intp *Interpreter) (any, error) {
 	var recurse func(i int) error
 	recurse = func(i int) error {
 		if i == len(clauses) {
+			// "partial" is an implicit variable available inside the return
+			// expression, bound to the list of results accumulated by
+			// prior iterations (enabling recursive-style accumulation,
+			// e.g. a factorial built via i * partial[-1]).
+			intp.Bind("partial", results)
 			res, err := returnExpr.Eval(intp)
 			if err != nil {
 				return err
@@ -483,9 +647,9 @@ func (node ForExpr) Eval(intp *Interpreter) (any, error) {
 		if err != nil {
 			return err
 		}
-		aList, ok := listLike.([]any)
-		if !ok {
-			return NewErrTypeMismatch("list")
+		aList, err := materializeIterationList(listLike)
+		if err != nil {
+			return err
 		}
 		for _, val := range aList {
 			intp.Bind(clauses[i].varname, val)
@@ -508,25 +672,25 @@ func (node SomeExpr) Eval(intp *Interpreter) (any, error) {
 		return nil, err
 	}
 
-	if aList, ok := listLike.([]any); ok {
-		intp.PushEmpty()
-		for _, val := range aList {
-			intp.Bind(node.Varname, val)
-
-			res, err := node.FilterExpr.Eval(intp)
-			if err != nil {
-				intp.Pop()
-				return nil, err
-			}
-			if boolValue(res) {
-				return val, nil
-			}
-		}
-		intp.Pop()
-		return nil, nil
-	} else {
-		return nil, NewErrTypeMismatch("list")
+	aList, err := materializeIterationList(listLike)
+	if err != nil {
+		return nil, err
 	}
+	intp.PushEmpty()
+	for _, val := range aList {
+		intp.Bind(node.Varname, val)
+
+		res, err := node.FilterExpr.Eval(intp)
+		if err != nil {
+			intp.Pop()
+			return nil, err
+		}
+		if boolValue(res) {
+			return val, nil
+		}
+	}
+	intp.Pop()
+	return nil, nil
 }
 
 func (node EveryExpr) Eval(intp *Interpreter) (any, error) {
@@ -535,27 +699,27 @@ func (node EveryExpr) Eval(intp *Interpreter) (any, error) {
 		return nil, err
 	}
 
-	if aList, ok := listLike.([]any); ok {
-		intp.PushEmpty()
-		chooses := make([]any, 0)
-		for _, val := range aList {
-			intp.Bind(node.Varname, val)
-
-			res, err := node.FilterExpr.Eval(intp)
-			if err != nil {
-				intp.Pop()
-				return nil, err
-			}
-
-			if boolValue(res) {
-				chooses = append(chooses, val)
-			}
-		}
-		intp.Pop()
-		return chooses, nil
-	} else {
-		return nil, NewErrTypeMismatch("list")
+	aList, err := materializeIterationList(listLike)
+	if err != nil {
+		return nil, err
 	}
+	intp.PushEmpty()
+	chooses := make([]any, 0)
+	for _, val := range aList {
+		intp.Bind(node.Varname, val)
+
+		res, err := node.FilterExpr.Eval(intp)
+		if err != nil {
+			intp.Pop()
+			return nil, err
+		}
+
+		if boolValue(res) {
+			chooses = append(chooses, val)
+		}
+	}
+	intp.Pop()
+	return chooses, nil
 }
 
 func (node FunDef) Eval(intp *Interpreter) (any, error) {

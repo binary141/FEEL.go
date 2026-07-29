@@ -125,6 +125,42 @@ func (v Var) Repr() string {
 }
 
 // number
+// valueNode wraps an already-evaluated value as a Node, so it can be
+// reused as an operand to existing AST evaluation logic (e.g. NegateNode
+// falling back to subtraction-from-zero for operand types with no direct
+// negation, without re-evaluating the original operand expression).
+type valueNode struct {
+	value     any
+	textRange TextRange
+}
+
+func (node valueNode) TextRange() TextRange {
+	return node.textRange
+}
+func (node valueNode) Repr() string {
+	return fmt.Sprintf("%v", node.value)
+}
+func (node valueNode) Eval(intp *Interpreter) (any, error) {
+	return node.value, nil
+}
+
+// NegateNode is FEEL unary minus ("-expr"). Numbers and durations negate
+// directly; other operand types (e.g. date/time) fall back to the
+// "0 - operand" arithmetic used for numeric negation, which correctly
+// surfaces as a type-mismatch error for operands that can't be negated.
+type NegateNode struct {
+	Operand Node
+
+	textRange TextRange
+}
+
+func (node NegateNode) TextRange() TextRange {
+	return node.textRange
+}
+func (node NegateNode) Repr() string {
+	return fmt.Sprintf("(neg %s)", node.Operand.Repr())
+}
+
 type NumberNode struct {
 	Value string
 
@@ -312,6 +348,13 @@ type RangeNode struct {
 
 	EndOpen bool
 	End     Node
+
+	// IterationRange marks a bare "start..end" range written directly as a
+	// "for"/"some"/"every" iteration source (as opposed to an explicit
+	// range literal like "[start..end]"). Only iteration ranges may
+	// descend (start > end); an explicit range literal with a descending
+	// endpoint pair is invalid.
+	IterationRange bool
 
 	textRange TextRange
 }

@@ -91,6 +91,53 @@ func decodeKWArgs(input map[string]any, output any) error {
 	return decoder.Decode(input)
 }
 
+var replaceGroupRefPattern = regexp.MustCompile(`\$(\d+)`)
+
+// feelReplacementTemplate rewrites FEEL/PCRE-style "$1" backreferences in a
+// replace() replacement string into Go's "${1}" form. Go's regexp package
+// otherwise greedily extends a "$name" reference across trailing letters
+// (so "$1c" is parsed as the named group "1c" instead of group 1 followed
+// by a literal "c"), silently dropping the intended literal text.
+func feelReplacementTemplate(repl string) string {
+	return replaceGroupRefPattern.ReplaceAllString(repl, "${$1}")
+}
+
+// regexInlineFlags translates a FEEL regex flags string ("s", "m", "i",
+// "x") into a Go regexp inline flag group ("(?ism)") prefix, or "" if no
+// flags apply. Go's regexp engine has no free-spacing ("x") mode, so that
+// flag is accepted (to avoid a spurious error) but has no effect. Any
+// character outside "smix" is invalid and reported as an error.
+func regexInlineFlags(flags string) (string, error) {
+	var goFlags string
+	for _, f := range flags {
+		if !strings.ContainsRune("smix", f) {
+			return "", fmt.Errorf("invalid regex flag %q", f)
+		}
+		if f != 'x' && !strings.ContainsRune(goFlags, f) {
+			goFlags += string(f)
+		}
+	}
+	if goFlags == "" {
+		return "", nil
+	}
+	return "(?" + goFlags + ")", nil
+}
+
+// dropNullArgs removes the given keys from kwargs when their value is
+// FEEL null, so an explicit "null" passed for an optional argument
+// behaves the same as omitting it, rather than failing to decode as the
+// argument's Go type.
+func dropNullArgs(kwargs map[string]any, names ...string) map[string]any {
+	for _, name := range names {
+		if v, ok := kwargs[name]; ok {
+			if _, isNull := v.(*NullValue); isNull {
+				delete(kwargs, name)
+			}
+		}
+	}
+	return kwargs
+}
+
 func extractList(args map[string]any, argName string) ([]any, error) {
 	if v, ok := args[argName]; ok {
 		if listV, ok := v.([]any); ok {
@@ -516,21 +563,48 @@ func installBuiltinFunctions(prelude *Prelude) {
 		return after, nil
 	}).Required("string", "match"))
 
-	prelude.Bind("matches", wrapTyped(func(s string, pattern string) (bool, error) {
-		re, err := regexp.Compile(pattern)
+	prelude.Bind("matches", NewNativeFunc(func(kwargs map[string]any) (any, error) {
+		type matchesArgs struct {
+			Input   string `json:"input"`
+			Pattern string `json:"pattern"`
+			Flags   string `json:"flags,omitempty"`
+		}
+		args := matchesArgs{}
+		if err := decodeKWArgs(dropNullArgs(kwargs, "flags"), &args); err != nil {
+			return nil, err
+		}
+		inlineFlags, err := regexInlineFlags(args.Flags)
+		if err != nil {
+			return Null, nil
+		}
+		re, err := regexp.Compile(inlineFlags + args.Pattern)
 		if err != nil {
 			return false, nil
 		}
-		return re.MatchString(s), nil
-	}).Required("input", "pattern"))
+		return re.MatchString(args.Input), nil
+	}).Required("input", "pattern").Optional("flags"))
 
-	prelude.Bind("replace", wrapTyped(func(s string, pattern string, replacement string) (string, error) {
-		re, err := regexp.Compile(pattern)
+	prelude.Bind("replace", NewNativeFunc(func(kwargs map[string]any) (any, error) {
+		type replaceArgs struct {
+			Input       string `json:"input"`
+			Pattern     string `json:"pattern"`
+			Replacement string `json:"replacement"`
+			Flags       string `json:"flags,omitempty"`
+		}
+		args := replaceArgs{}
+		if err := decodeKWArgs(dropNullArgs(kwargs, "flags"), &args); err != nil {
+			return nil, err
+		}
+		inlineFlags, err := regexInlineFlags(args.Flags)
+		if err != nil {
+			return Null, nil
+		}
+		re, err := regexp.Compile(inlineFlags + args.Pattern)
 		if err != nil {
 			return "", nil
 		}
-		return re.ReplaceAllString(s, replacement), nil
-	}).Required("input", "pattern", "replacement"))
+		return re.ReplaceAllString(args.Input, feelReplacementTemplate(args.Replacement)), nil
+	}).Required("input", "pattern", "replacement").Optional("flags"))
 
 	prelude.Bind("split", wrapTyped(func(s string, delimiter string) ([]any, error) {
 		re, err := regexp.Compile(delimiter)
@@ -616,13 +690,18 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err != nil {
 			return nil, err
 		}
-		sum := N(1)
-		for _, entry := range list {
-			if numEntry, ok := entry.(*Number); ok {
-				sum = sum.Mul(numEntry)
-			}
+		if len(list) == 0 {
+			return Null, nil
 		}
-		return sum, nil
+		result := N(1)
+		for _, entry := range list {
+			numEntry, ok := entry.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			result = result.Mul(numEntry)
+		}
+		return result, nil
 	}).Vararg("list"))
 
 	prelude.Bind("mean", NewNativeFunc(func(args map[string]any) (any, error) {

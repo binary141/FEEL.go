@@ -36,6 +36,21 @@ const (
 
 var offsetSuffixPattern = regexp.MustCompile(`([+-])(\d{2}):(\d{2})(?::\d{2})?$`)
 
+// isZoned reports whether a temporal value carries explicit zone/offset
+// info. A date has none of its own but implies UTC, so it is always
+// treated as zoned; a date-time is zoned only if it was parsed with an
+// offset or named zone.
+func isZoned(v any) bool {
+	switch vv := v.(type) {
+	case *FEELDate:
+		return true
+	case *FEELDatetime:
+		return vv.zoneKind != zoneNone
+	default:
+		return false
+	}
+}
+
 // classifyZone inspects a raw temporal literal's text and reports how (if at
 // all) it expressed a time zone.
 func classifyZone(src string) (kind int, name string) {
@@ -60,7 +75,15 @@ func formatZoned(t time.Time, layout string, kind int, name string) string {
 	case zoneNamed:
 		return s + "@" + name
 	case zoneOffset:
-		return s + t.Format("-07:00")
+		_, offsetSecs := t.Zone()
+		switch {
+		case offsetSecs == 0:
+			return s + "Z"
+		case offsetSecs%60 != 0:
+			return s + t.Format("-07:00:00")
+		default:
+			return s + t.Format("-07:00")
+		}
 	default:
 		return s
 	}
@@ -406,6 +429,26 @@ func parseLargeYearDatetime(s string, loc *time.Location) (time.Time, bool) {
 	return t, true
 }
 
+// midnight24Pattern matches the ISO 8601 "T24:00:00" representation of
+// midnight at the end of a day (only valid with zero minutes/seconds).
+var midnight24Pattern = regexp.MustCompile(`^(\d{4,9}-\d{2}-\d{2})T24:00:00(\.0+)?(.*)$`)
+
+// normalizeMidnight24 rewrites a "T24:00:00" datetime (Go's time.Parse
+// rejects hour 24) into the equivalent "T00:00:00" on the following day,
+// preserving any trailing offset/zone suffix.
+func normalizeMidnight24(temporalStr string) string {
+	m := midnight24Pattern.FindStringSubmatch(temporalStr)
+	if m == nil {
+		return temporalStr
+	}
+	t, err := time.Parse("2006-01-02", m[1])
+	if err != nil {
+		return temporalStr
+	}
+	next := t.AddDate(0, 0, 1)
+	return next.Format("2006-01-02") + "T00:00:00" + m[3]
+}
+
 func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 	// Handle negative years like "-2016-01-30T09:05:00"
 	if len(temporalStr) > 1 && temporalStr[0] == '-' && temporalStr[1] >= '0' && temporalStr[1] <= '9' {
@@ -423,6 +466,7 @@ func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 			return &FEELDatetime{t: t}, nil
 		}
 	}
+	temporalStr = normalizeMidnight24(temporalStr)
 	if !datetimeClockPattern.MatchString(temporalStr) {
 		return nil, ErrParseTemporal
 	}
@@ -858,9 +902,125 @@ func installDatetimeFunctions(prelude *Prelude) {
 		}
 	}))
 
-	prelude.Bind("time", wrapTyped(func(frm string) (any, error) {
-		return ParseTime(frm)
-	}).Required("from"))
+	prelude.Bind("time", NewRawFunc(func(intp *Interpreter, node FunCall) (any, error) {
+		eval := func(n Node) (any, error) { return n.Eval(intp) }
+
+		// time(from): a string is parsed as a time literal; a date/time/
+		// date-time value has its time-of-day component extracted (a bare
+		// date has no time of day, so it implies midnight UTC).
+		fromValue := func(fromNode Node) (any, error) {
+			v, err := eval(fromNode)
+			if err != nil {
+				return nil, err
+			}
+			if _, isNull := v.(*NullValue); isNull {
+				return Null, nil
+			}
+			switch vv := v.(type) {
+			case string:
+				t, err := ParseTime(vv)
+				if err != nil {
+					return Null, nil
+				}
+				return t, nil
+			case *FEELTime:
+				return &FEELTime{t: vv.t, zoneKind: vv.zoneKind, zoneName: vv.zoneName}, nil
+			case *FEELDatetime:
+				return &FEELTime{t: vv.t, zoneKind: vv.zoneKind, zoneName: vv.zoneName}, nil
+			case *FEELDate:
+				return &FEELTime{t: time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), zoneKind: zoneOffset}, nil
+			default:
+				return Null, nil
+			}
+		}
+
+		// time(hour, minute, second[, offset]): offset is a day-time
+		// duration giving the zone offset from UTC, or null/omitted for no
+		// zone info.
+		byParts := func(hourNode, minuteNode, secondNode, offsetNode Node) (any, error) {
+			hourVal, err := eval(hourNode)
+			if err != nil {
+				return nil, err
+			}
+			minuteVal, err := eval(minuteNode)
+			if err != nil {
+				return nil, err
+			}
+			secondVal, err := eval(secondNode)
+			if err != nil {
+				return nil, err
+			}
+			hourN, ok := hourVal.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			minuteN, ok := minuteVal.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			secondN, ok := secondVal.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			hour, minute, second := hourN.Int(), minuteN.Int(), secondN.Float64()
+			if hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second >= 60 {
+				return Null, nil
+			}
+			secInt := int(second)
+			nsec := int((second - float64(secInt)) * 1e9)
+
+			loc := time.UTC
+			zoneKind := zoneNone
+			if offsetNode != nil {
+				offsetVal, err := eval(offsetNode)
+				if err != nil {
+					return nil, err
+				}
+				if _, isNull := offsetVal.(*NullValue); !isNull {
+					dur, ok := offsetVal.(*FEELDuration)
+					if !ok || dur.IsYearMonth() {
+						return Null, nil
+					}
+					loc = time.FixedZone("", int(dur.Duration().Seconds()))
+					zoneKind = zoneOffset
+				}
+			}
+			t := time.Date(0, 1, 1, hour, minute, secInt, nsec, loc)
+			return &FEELTime{t: t, zoneKind: zoneKind}, nil
+		}
+
+		if node.keywordArgs {
+			kwArgMap := make(map[string]Node)
+			for _, a := range node.Args {
+				kwArgMap[a.argName] = a.arg
+			}
+			if len(kwArgMap) == 1 {
+				if fromNode, ok := kwArgMap["from"]; ok {
+					return fromValue(fromNode)
+				}
+				return Null, nil
+			}
+			hourNode, ok1 := kwArgMap["hour"]
+			minuteNode, ok2 := kwArgMap["minute"]
+			secondNode, ok3 := kwArgMap["second"]
+			if (len(kwArgMap) == 3 || len(kwArgMap) == 4) && ok1 && ok2 && ok3 {
+				offsetNode := kwArgMap["offset"]
+				return byParts(hourNode, minuteNode, secondNode, offsetNode)
+			}
+			return Null, nil
+		}
+
+		switch len(node.Args) {
+		case 1:
+			return fromValue(node.Args[0].arg)
+		case 3:
+			return byParts(node.Args[0].arg, node.Args[1].arg, node.Args[2].arg, nil)
+		case 4:
+			return byParts(node.Args[0].arg, node.Args[1].arg, node.Args[2].arg, node.Args[3].arg)
+		default:
+			return Null, nil
+		}
+	}))
 
 	prelude.Bind("date and time", NewNativeFunc(func(args map[string]any) (any, error) {
 		_, hasExtra := args["__extra"]

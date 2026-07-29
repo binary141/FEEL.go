@@ -15,6 +15,11 @@ type RangeValue struct {
 	End     any
 
 	elementType string // set by range() function; empty means derive from Start
+
+	// iterationRange marks a range built from a bare "start..end" written
+	// directly as a for/some/every iteration source; only these may
+	// legitimately descend (start > end).
+	iterationRange bool
 }
 
 func (rv RangeValue) GetAttr(name string) (any, bool) {
