@@ -34,6 +34,11 @@ type NativeFun struct {
 	optionalArgNames []string
 	varArgName       string
 	help             string
+	// argAliases maps an alternate keyword-argument name to the canonical
+	// required/optional name it stands in for, for built-ins whose
+	// parameter names have changed across FEEL spec versions (e.g. "m" for
+	// "context").
+	argAliases map[string]string
 }
 
 func NewNativeFunc(fn NativeFunDef) *NativeFun {
@@ -47,6 +52,14 @@ func (nfun *NativeFun) Required(argNames ...string) *NativeFun {
 
 func (nfun *NativeFun) Optional(argNames ...string) *NativeFun {
 	nfun.optionalArgNames = append(nfun.optionalArgNames, argNames...)
+	return nfun
+}
+
+func (nfun *NativeFun) Alias(canonical, alias string) *NativeFun {
+	if nfun.argAliases == nil {
+		nfun.argAliases = make(map[string]string)
+	}
+	nfun.argAliases[alias] = canonical
 	return nfun
 }
 
@@ -75,6 +88,21 @@ func (nfun *NativeFun) Call(intp *Interpreter, args map[string]any) (any, error)
 		return nil, err
 	}
 	return normalizeValue(v), nil
+}
+
+// RawFunc is a built-in with full control over argument dispatch: it sees
+// the raw FunCall (positional or named, any arity) instead of having
+// arguments pre-mapped to a fixed declared name list. Used for builtins
+// whose accepted parameter names differ by arity (e.g. date(from) vs.
+// date(year, month, day)).
+type RawFuncDef func(intp *Interpreter, node FunCall) (any, error)
+
+type RawFunc struct {
+	fn RawFuncDef
+}
+
+func NewRawFunc(fn RawFuncDef) *RawFunc {
+	return &RawFunc{fn: fn}
 }
 
 // macro

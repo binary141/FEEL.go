@@ -240,8 +240,27 @@ func ParseDate(timeStr string) (*FEELDate, error) {
 			return &FEELDate{t: t}, nil
 		}
 	}
+	if m := largeYearDateRe.FindStringSubmatch(timeStr); m != nil {
+		if len(m[1]) > 4 && m[1][0] == '0' {
+			return nil, ErrParseTemporal
+		}
+		year, _ := strconv.Atoi(m[1])
+		month, _ := strconv.Atoi(m[2])
+		day, _ := strconv.Atoi(m[3])
+		if month < 1 || month > 12 || day < 1 || day > 31 {
+			return nil, ErrParseTemporal
+		}
+		t := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+		if t.Year() != year || int(t.Month()) != month || t.Day() != day {
+			return nil, ErrParseTemporal
+		}
+		return &FEELDate{t: t}, nil
+	}
 	return nil, ErrParseTemporal
 }
+
+// largeYearDateRe matches date strings with 4-9 digit years (Go's "2006-01-02" layout only accepts exactly 4).
+var largeYearDateRe = regexp.MustCompile(`^(\d{4,9})-(\d{2})-(\d{2})$`)
 
 // Date and Time
 type FEELDatetime struct {
@@ -355,6 +374,9 @@ var largeYearDTRe = regexp.MustCompile(`^(\d{4,9})-(\d{2})-(\d{2})T(\d{2}):(\d{2
 func parseLargeYearDatetime(s string, loc *time.Location) (time.Time, bool) {
 	m := largeYearDTRe.FindStringSubmatch(s)
 	if m == nil {
+		return time.Time{}, false
+	}
+	if len(m[1]) > 4 && m[1][0] == '0' {
 		return time.Time{}, false
 	}
 	year, _ := strconv.Atoi(m[1])
@@ -737,26 +759,104 @@ func ParseTemporalValue(temporalStr string) (any, error) {
 }
 
 // builtin functions
-func installDatetimeFunctions(prelude *Prelude) {
-	// conversions
-	prelude.Bind("date", NewNativeFunc(func(args map[string]any) (any, error) {
-		fromVal, ok := args["from"]
-		if !ok {
-			return Null, nil
-		}
-		if _, isNull := fromVal.(*NullValue); isNull {
-			return Null, nil
-		}
-		frm, ok := fromVal.(string)
-		if !ok {
-			return Null, nil
-		}
-		d, err := ParseDate(frm)
+// dateFromValue implements the single-argument form of date(from): a
+// string is parsed as a date literal; a date/date-time value has its date
+// component extracted (dropping any time-of-day).
+func dateFromValue(eval func(Node) (any, error), fromNode Node) (any, error) {
+	fromVal, err := eval(fromNode)
+	if err != nil {
+		return nil, err
+	}
+	if _, isNull := fromVal.(*NullValue); isNull {
+		return Null, nil
+	}
+	if s, ok := fromVal.(string); ok {
+		d, err := ParseDate(s)
 		if err != nil {
 			return Null, nil
 		}
 		return d, nil
-	}).Required("from"))
+	}
+	if hasDate, ok := fromVal.(HasDate); ok {
+		d := hasDate.Date()
+		return &FEELDate{t: time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)}, nil
+	}
+	return Null, nil
+}
+
+func installDatetimeFunctions(prelude *Prelude) {
+	// conversions
+	prelude.Bind("date", NewRawFunc(func(intp *Interpreter, node FunCall) (any, error) {
+		eval := func(n Node) (any, error) { return n.Eval(intp) }
+
+		// date(year, month, day) / date(year: ..., month: ..., day: ...)
+		byParts := func(yearNode, monthNode, dayNode Node) (any, error) {
+			yearVal, err := eval(yearNode)
+			if err != nil {
+				return nil, err
+			}
+			monthVal, err := eval(monthNode)
+			if err != nil {
+				return nil, err
+			}
+			dayVal, err := eval(dayNode)
+			if err != nil {
+				return nil, err
+			}
+			year, ok := yearVal.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			month, ok := monthVal.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			day, ok := dayVal.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			y, m, d := year.Int(), month.Int(), day.Int()
+			if y < -999999999 || y > 999999999 || m < 1 || m > 12 || d < 1 || d > 31 {
+				return Null, nil
+			}
+			t := time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC)
+			if t.Year() != y || int(t.Month()) != m || t.Day() != d {
+				return Null, nil
+			}
+			return &FEELDate{t: t}, nil
+		}
+
+		if node.keywordArgs {
+			kwArgMap := make(map[string]Node)
+			for _, a := range node.Args {
+				kwArgMap[a.argName] = a.arg
+			}
+			if len(kwArgMap) == 1 {
+				if fromNode, ok := kwArgMap["from"]; ok {
+					return dateFromValue(eval, fromNode)
+				}
+				return Null, nil
+			}
+			if len(kwArgMap) == 3 {
+				yearNode, ok1 := kwArgMap["year"]
+				monthNode, ok2 := kwArgMap["month"]
+				dayNode, ok3 := kwArgMap["day"]
+				if ok1 && ok2 && ok3 {
+					return byParts(yearNode, monthNode, dayNode)
+				}
+			}
+			return Null, nil
+		}
+
+		switch len(node.Args) {
+		case 1:
+			return dateFromValue(eval, node.Args[0].arg)
+		case 3:
+			return byParts(node.Args[0].arg, node.Args[1].arg, node.Args[2].arg)
+		default:
+			return Null, nil
+		}
+	}))
 
 	prelude.Bind("time", wrapTyped(func(frm string) (any, error) {
 		return ParseTime(frm)

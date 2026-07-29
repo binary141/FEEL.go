@@ -24,6 +24,8 @@ var Null = &NullValue{}
 
 func boolValue(condVal any) bool {
 	switch v := condVal.(type) {
+	case *NullValue:
+		return false
 	case int64:
 		return v != 0
 	case float64:
@@ -237,6 +239,7 @@ func (node BetweenExpr) Eval(intp *Interpreter) (any, error) {
 
 var typeNameAliases = map[string]string{
 	"date and time": "datetime",
+	"boolean":       "bool",
 }
 
 func rangeElementTypeName(rv *RangeValue) string {
@@ -270,12 +273,30 @@ func (node InstanceOfNode) Eval(intp *Interpreter) (any, error) {
 		return nil, err
 	}
 	expected := node.TypeName
+	if expected == "Any" {
+		_, isNull := val.(*NullValue)
+		return !isNull, nil
+	}
 	if strings.HasPrefix(expected, "range<") {
 		rv, ok := val.(*RangeValue)
 		if !ok {
 			return false, nil
 		}
 		return rangeElementTypeName(rv) == expected, nil
+	}
+	if expected == "years and months duration" || expected == "days and time duration" {
+		dur, ok := val.(*FEELDuration)
+		if !ok {
+			return false, nil
+		}
+		return dur.IsYearMonth() == (expected == "years and months duration"), nil
+	}
+	// list<...>, context<...>, function<...>->...: FEEL.go has no
+	// structural DMN type system, so only the outer kind is checked.
+	if idx := strings.IndexAny(expected, "<"); idx >= 0 {
+		expected = expected[:idx]
+	} else if idx := strings.Index(expected, " -> "); idx >= 0 {
+		expected = expected[:idx]
 	}
 	if canonical, ok := typeNameAliases[expected]; ok {
 		expected = canonical
@@ -333,6 +354,9 @@ func (node MapNode) Eval(intp *Interpreter) (any, error) {
 	intp.PushEmpty()
 	defer intp.Pop()
 	for _, item := range node.Values {
+		if _, dup := mapVal[item.Name]; dup {
+			return nil, fmt.Errorf("duplicate context entry key %q", item.Name)
+		}
 		v, err := item.Value.Eval(intp)
 		if err != nil {
 			return nil, err
@@ -349,16 +373,15 @@ func (node DotOp) Eval(intp *Interpreter) (any, error) {
 		return nil, err
 	}
 	if listVal, ok := leftVal.([]any); ok {
-		var result []any
-		for _, elem := range listVal {
+		result := make([]any, len(listVal))
+		for i, elem := range listVal {
 			if mapElem, ok := elem.(map[string]any); ok {
 				if val, found := mapElem[node.Attr]; found {
-					result = append(result, val)
+					result[i] = val
+					continue
 				}
 			}
-		}
-		if result == nil {
-			return []any{}, nil
+			result[i] = Null
 		}
 		return result, nil
 	} else if mapVal, ok := leftVal.(map[string]any); ok {
@@ -403,29 +426,60 @@ func (node IfExpr) Eval(intp *Interpreter) (any, error) {
 }
 
 func (node ForExpr) Eval(intp *Interpreter) (any, error) {
-	listLike, err := node.ListExpr.Eval(intp)
-	if err != nil {
-		return nil, err
+	// Collect a chain of comma-separated "for a in X, b in Y, ... return Z"
+	// clauses (as opposed to a literal nested "for" written as the return
+	// expression) so they can be evaluated as a single flattened cartesian
+	// product rather than a nested list.
+	type forClause struct {
+		varname  string
+		listExpr Node
+	}
+	clauses := []forClause{{node.Varname, node.ListExpr}}
+	returnExpr := node.ReturnExpr
+	for {
+		next, ok := returnExpr.(*ForExpr)
+		if !ok || !next.Chained {
+			break
+		}
+		clauses = append(clauses, forClause{next.Varname, next.ListExpr})
+		returnExpr = next.ReturnExpr
 	}
 
-	if aList, ok := listLike.([]any); ok {
-		intp.PushEmpty()
-		results := make([]any, 0)
-		for _, val := range aList {
-			intp.Bind(node.Varname, val)
+	intp.PushEmpty()
+	defer intp.Pop()
 
-			res, err := node.ReturnExpr.Eval(intp)
+	results := make([]any, 0)
+	var recurse func(i int) error
+	recurse = func(i int) error {
+		if i == len(clauses) {
+			res, err := returnExpr.Eval(intp)
 			if err != nil {
-				intp.Pop()
-				return nil, err
+				return err
 			}
 			results = append(results, res)
+			return nil
 		}
-		intp.Pop()
-		return results, nil
-	} else {
-		return nil, NewErrTypeMismatch("list")
+		listLike, err := clauses[i].listExpr.Eval(intp)
+		if err != nil {
+			return err
+		}
+		aList, ok := listLike.([]any)
+		if !ok {
+			return NewErrTypeMismatch("list")
+		}
+		for _, val := range aList {
+			intp.Bind(clauses[i].varname, val)
+			if err := recurse(i + 1); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
+
+	if err := recurse(0); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func (node SomeExpr) Eval(intp *Interpreter) (any, error) {
@@ -515,6 +569,8 @@ func (node FunCall) Eval(intp *Interpreter) (any, error) {
 		return node.EvalNativeFun(intp, r)
 	case *Macro:
 		return node.EvalMacro(intp, r)
+	case *RawFunc:
+		return r.fn(intp, node)
 	default:
 		return Null, nil
 	}
@@ -526,6 +582,14 @@ func (node FunCall) EvalNativeFun(intp *Interpreter, funDef *NativeFun) (any, er
 		kwArgMap, err := node.evalArgsToMap(intp)
 		if err != nil {
 			return nil, err
+		}
+		for alias, canonical := range funDef.argAliases {
+			if v, ok := kwArgMap[alias]; ok {
+				if _, taken := kwArgMap[canonical]; !taken {
+					kwArgMap[canonical] = v
+				}
+				delete(kwArgMap, alias)
+			}
 		}
 
 		knownKwArgs := make(map[string]bool, len(funDef.requiredArgNames)+len(funDef.optionalArgNames))
@@ -546,6 +610,9 @@ func (node FunCall) EvalNativeFun(intp *Interpreter, funDef *NativeFun) (any, er
 		if funDef.varArgName != "" {
 			for k, v := range kwArgMap {
 				if !knownKwArgs[k] {
+					if k != funDef.varArgName {
+						return Null, nil
+					}
 					if vars, ok := argVals[funDef.varArgName]; ok {
 						varargs := vars.([]any)
 						varargs = append(varargs, v)

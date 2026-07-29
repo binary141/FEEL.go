@@ -290,6 +290,90 @@ func wrapAsUnaryEq(n Node) Node {
 	return &Binop{Left: &Var{Name: "?"}, Op: "=", Right: n}
 }
 
+// parseInstanceOfTypeExpr parses the type name on the right of "instance
+// of". It handles simple names ("number"), compound names ("date and
+// time"), and parameterized types ("range<number>", "list<Any>",
+// "context<a: string, b: number>", "function<string>-> number"). The
+// returned string is a best-effort textual descriptor: FEEL.go doesn't
+// implement full DMN structural typing, so InstanceOfNode.Eval only uses
+// the outer type keyword for list/context/function and ignores the inner
+// structure.
+func (p *Parser) parseInstanceOfTypeExpr() (string, error) {
+	if p.CurrentToken().Kind != TokenName &&
+		!(p.CurrentToken().Kind == TokenKeyword && p.CurrentToken().Value == "function") {
+		return "", p.Unexpected("type name")
+	}
+	typeName := p.CurrentToken().Value
+	p.scanner.Next()
+
+	// Handle compound type names ("date and time", "years and months
+	// duration", "days and time duration").
+	for p.CurrentToken().ExpectKeywords("and") {
+		p.scanner.Next() // consume "and"
+		if p.CurrentToken().Kind != TokenName {
+			break
+		}
+		typeName += " and " + p.CurrentToken().Value
+		p.scanner.Next() // consume name after "and"
+		// "years and months duration" / "days and time duration" have a
+		// trailing bare word after the "and" part.
+		if p.CurrentToken().Kind == TokenName && (p.CurrentToken().Value == "duration") {
+			typeName += " " + p.CurrentToken().Value
+			p.scanner.Next()
+		}
+	}
+
+	// Handle parameterized types (e.g. "range<number>", "list<Any>",
+	// "context<a: string, b: number>", "function<string, number>").
+	if p.CurrentToken().Expect("<") {
+		p.scanner.Next() // consume '<'
+		var parts []string
+		for !p.CurrentToken().Expect(">") {
+			part, err := p.parseInstanceOfTypeExpr()
+			if err != nil {
+				return "", err
+			}
+			if p.CurrentToken().Expect(":") {
+				p.scanner.Next()
+				valType, err := p.parseInstanceOfTypeExpr()
+				if err != nil {
+					return "", err
+				}
+				part = part + ": " + valType
+			}
+			parts = append(parts, part)
+			if p.CurrentToken().Expect(",") {
+				p.scanner.Next()
+			} else {
+				break
+			}
+		}
+		if !p.CurrentToken().Expect(">") {
+			return "", p.Unexpected(">")
+		}
+		p.scanner.Next() // consume '>'
+		typeName = typeName + "<" + strings.Join(parts, ", ") + ">"
+	}
+
+	// Handle a function's "-> returnType" suffix.
+	if typeName == "function" || strings.HasPrefix(typeName, "function<") {
+		if p.CurrentToken().Expect("-") {
+			p.scanner.Next()
+			if !p.CurrentToken().Expect(">") {
+				return "", p.Unexpected(">")
+			}
+			p.scanner.Next()
+			retType, err := p.parseInstanceOfTypeExpr()
+			if err != nil {
+				return "", err
+			}
+			typeName = typeName + " -> " + retType
+		}
+	}
+
+	return typeName, nil
+}
+
 func (p *Parser) betweenOp() (Node, error) {
 	textRange := p.startTextRange()
 	left, err := p.logicOrOp()
@@ -302,33 +386,9 @@ func (p *Parser) betweenOp() (Node, error) {
 			return nil, p.Unexpected("of")
 		}
 		p.scanner.Next()
-		if p.CurrentToken().Kind != TokenName {
-			return nil, p.Unexpected("type name")
-		}
-		typeName := p.CurrentToken().Value
-		p.scanner.Next()
-		// Handle compound type names (e.g. "date and time")
-		for p.CurrentToken().ExpectKeywords("and") {
-			p.scanner.Next() // consume "and"
-			if p.CurrentToken().Kind != TokenName {
-				break
-			}
-			typeName += " and " + p.CurrentToken().Value
-			p.scanner.Next() // consume name after "and"
-		}
-		// Handle parameterized types (e.g. "range<number>", "range<date and time>")
-		if typeName == "range" && p.CurrentToken().Expect("<") {
-			p.scanner.Next() // consume '<'
-			innerParts := []string{}
-			for p.CurrentToken().Kind == TokenName || p.CurrentToken().ExpectKeywords("and") {
-				innerParts = append(innerParts, p.CurrentToken().Value)
-				p.scanner.Next()
-			}
-			if !p.CurrentToken().Expect(">") {
-				return nil, p.Unexpected(">")
-			}
-			p.scanner.Next() // consume '>'
-			typeName = "range<" + strings.Join(innerParts, " ") + ">"
+		typeName, err := p.parseInstanceOfTypeExpr()
+		if err != nil {
+			return nil, err
 		}
 		textRange.End = p.CurrentToken().Pos
 		return &InstanceOfNode{Value: left, TypeName: typeName, textRange: textRange}, nil
@@ -595,7 +655,7 @@ func (p *Parser) singleElement() (Node, error) {
 		case "if":
 			return p.parseIfExpression()
 		case "for":
-			return p.parseForExpr()
+			return p.parseForExpr(false)
 		case "function":
 			return p.parseFunDef()
 		case "some":
@@ -921,7 +981,7 @@ func (p *Parser) parseIfExpression() (Node, error) {
 
 }
 
-func (p *Parser) parseForExpr() (Node, error) {
+func (p *Parser) parseForExpr(chained bool) (Node, error) {
 	rng := p.startTextRange()
 	p.scanner.Next()
 	varName, err := p.parseName("in", "for")
@@ -941,7 +1001,7 @@ func (p *Parser) parseForExpr() (Node, error) {
 	//fmt.Printf("list expr %s\n", listExpr.Repr())
 
 	if p.CurrentToken().Expect(",") {
-		returnExpr, err := p.parseForExpr()
+		returnExpr, err := p.parseForExpr(true)
 		if err != nil {
 			return nil, err
 		}
@@ -949,6 +1009,7 @@ func (p *Parser) parseForExpr() (Node, error) {
 			Varname:    varName,
 			ListExpr:   listExpr,
 			ReturnExpr: returnExpr,
+			Chained:    chained,
 		}, nil
 	}
 
@@ -967,6 +1028,7 @@ func (p *Parser) parseForExpr() (Node, error) {
 		Varname:    varName,
 		ListExpr:   listExpr,
 		ReturnExpr: returnExpr,
+		Chained:    chained,
 		textRange:  rng,
 	}, nil
 }

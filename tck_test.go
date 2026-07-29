@@ -261,6 +261,14 @@ func valuesEqual(t *testing.T, expected tckNode, actual any) bool {
 }
 
 func deepValuesEqual(want, actual any) bool {
+	// FEEL semantics: a singleton list may be used wherever the single
+	// value it contains is expected, so a decision typed as a scalar may
+	// legitimately produce a one-element list.
+	if _, wantIsList := want.([]any); !wantIsList {
+		if a, ok := actual.([]any); ok && len(a) == 1 {
+			actual = a[0]
+		}
+	}
 	switch w := want.(type) {
 	case *NullValue:
 		_, ok := actual.(*NullValue)
@@ -421,6 +429,47 @@ func TestTCKComplianceLevel3(t *testing.T) {
 	runTCKSuite(t, tckComplianceLevel3Dir)
 }
 
+// evalDecision evaluates the named decision, first recursively evaluating
+// any decisions it requires as inputs (per its informationRequirements) and
+// binding their results into scope. Results are memoized directly in scope
+// so sibling result nodes in the same test case reuse them.
+func evalDecision(m *tckModel, name string, scope Scope, visiting map[string]bool) (any, error) {
+	if v, ok := scope[name]; ok {
+		return v, nil
+	}
+	d, ok := m.decisionsBy[name]
+	if !ok {
+		return nil, fmt.Errorf("no decision named %q in model", name)
+	}
+	if visiting[name] {
+		return nil, fmt.Errorf("cyclic decision dependency involving %q", name)
+	}
+	visiting[name] = true
+	defer delete(visiting, name)
+
+	for _, ir := range d.InfoReqs {
+		if ir.RequiredDecision != nil {
+			depName := m.idToName[ir.RequiredDecision.id()]
+			if _, err := evalDecision(m, depName, scope, visiting); err != nil {
+				return nil, fmt.Errorf("required decision %q: %w", depName, err)
+			}
+		}
+	}
+
+	intp := NewIntepreter()
+	intp.Push(scope)
+	ast, err := ParseString(d.LitExpr.Text)
+	if err != nil {
+		return nil, fmt.Errorf("parse error: %w", err)
+	}
+	got, err := ast.Eval(intp)
+	if err != nil {
+		return nil, fmt.Errorf("eval error: %w", err)
+	}
+	scope[name] = got
+	return got, nil
+}
+
 func runTCKSuite(t *testing.T, root string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -468,27 +517,16 @@ func runTCKSuite(t *testing.T, root string) {
 					}
 
 					for _, rn := range tc.ResultNode {
-						d, ok := m.decisionsBy[rn.Name]
-						if !ok {
+						if _, ok := m.decisionsBy[rn.Name]; !ok {
 							t.Fatalf("no decision named %q in model", rn.Name)
 						}
 
-						intp := NewIntepreter()
-						intp.Push(scope)
-						ast, err := ParseString(d.LitExpr.Text)
+						got, err := evalDecision(m, rn.Name, scope, map[string]bool{})
 						if err != nil {
 							if rn.ErrorResult {
 								continue
 							}
-							t.Errorf("decision %q: parse error: %v", rn.Name, err)
-							continue
-						}
-						got, err := ast.Eval(intp)
-						if err != nil {
-							if rn.ErrorResult {
-								continue
-							}
-							t.Errorf("decision %q: eval error: %v", rn.Name, err)
+							t.Errorf("decision %q: %v", rn.Name, err)
 							continue
 						}
 						if rn.ErrorResult {

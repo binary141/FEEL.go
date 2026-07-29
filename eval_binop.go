@@ -115,9 +115,9 @@ func compareInterfaces(leftVal, rightVal any) (int, error) {
 			}
 		}
 	case *FEELDuration:
-		if rightDur, ok := rightVal.(*FEELDuration); ok {
+		if rightDur, ok := rightVal.(*FEELDuration); ok && v.IsYearMonth() == rightDur.IsYearMonth() {
 			var left, right int64
-			if v.IsYearMonth() && rightDur.IsYearMonth() {
+			if v.IsYearMonth() {
 				left = v.TotalMonths()
 				right = rightDur.TotalMonths()
 			} else {
@@ -212,6 +212,27 @@ func (binop Binop) compareValues(intp *Interpreter) (int, error) {
 		return 0, err
 	}
 	return compareInterfaces(leftVal, rightVal)
+}
+
+// orderingCompare evaluates operands for ordering comparisons (<, <=, >, >=).
+// Per the FEEL spec, if either operand is null the result is null, not an error.
+func (binop Binop) orderingCompare(intp *Interpreter) (int, bool, error) {
+	leftVal, err := binop.Left.Eval(intp)
+	if err != nil {
+		return 0, false, err
+	}
+	rightVal, err := binop.Right.Eval(intp)
+	if err != nil {
+		return 0, false, err
+	}
+	if _, ok := leftVal.(*NullValue); ok {
+		return 0, true, nil
+	}
+	if _, ok := rightVal.(*NullValue); ok {
+		return 0, true, nil
+	}
+	r, err := compareInterfaces(leftVal, rightVal)
+	return r, false, err
 }
 
 func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op string) (any, error) {
@@ -427,52 +448,75 @@ func (binop Binop) divOp(intp *Interpreter) (any, error) {
 }
 
 func (binop Binop) compareGTOp(intp *Interpreter) (any, error) {
-	r, err := binop.compareValues(intp)
+	r, isNull, err := binop.orderingCompare(intp)
 	if err != nil {
 		return false, err
+	} else if isNull {
+		return Null, nil
 	} else {
 		return r > 0, nil
 	}
 }
 
 func (binop Binop) compareGEOp(intp *Interpreter) (any, error) {
-	r, err := binop.compareValues(intp)
+	r, isNull, err := binop.orderingCompare(intp)
 	if err != nil {
 		return false, err
+	} else if isNull {
+		return Null, nil
 	} else {
 		return r >= 0, nil
 	}
 }
 
 func (binop Binop) compareLTOp(intp *Interpreter) (any, error) {
-	r, err := binop.compareValues(intp)
+	r, isNull, err := binop.orderingCompare(intp)
 	if err != nil {
 		return false, err
+	} else if isNull {
+		return Null, nil
 	} else {
 		return r < 0, nil
 	}
 }
 
 func (binop Binop) compareLEOp(intp *Interpreter) (any, error) {
-	r, err := binop.compareValues(intp)
+	r, isNull, err := binop.orderingCompare(intp)
 	if err != nil {
 		return false, err
+	} else if isNull {
+		return Null, nil
 	} else {
 		return r <= 0, nil
 	}
 }
 
 func (binop Binop) equalOp(intp *Interpreter) (any, error) {
-	r, err := binop.compareValues(intp)
+	leftVal, err := binop.Left.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	rightVal, err := binop.Right.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	_, leftNull := leftVal.(*NullValue)
+	_, rightNull := rightVal.(*NullValue)
+	// null compared against a known non-null value is a definite
+	// inequality; only a genuine type mismatch between two non-null
+	// values of incompatible types is "unknown" (null).
+	if leftNull != rightNull {
+		return false, nil
+	}
+	r, err := compareInterfaces(leftVal, rightVal)
 	if err != nil {
 		var evalError *EvalError
 		if errors.As(err, &evalError) && evalError.Code == -3106 {
-			return false, nil
+			return Null, nil
 		}
 		return false, err
-	} else {
-		return r == 0, nil
 	}
+	return r == 0, nil
 }
 
 func (binop Binop) notEqalOp(intp *Interpreter) (any, error) {
@@ -501,28 +545,31 @@ func (binop Binop) modOp(intp *Interpreter) (any, error) {
 		"%")
 }
 
-// circuit break operators
+// circuit break operators. Per FEEL's three-valued logic, only actual
+// booleans participate as true/false; anything else (null, a number, a
+// string, ...) is "unknown" and only affects the result when it isn't
+// already decided by a false (and) / true (or) operand.
 func (binop Binop) andOp(intp *Interpreter) (any, error) {
 	leftVal, err := binop.Left.Eval(intp)
 	if err != nil {
 		return nil, err
 	}
-	_, leftNull := leftVal.(*NullValue)
-	if !leftNull && !boolValue(leftVal) {
+	if lb, ok := leftVal.(bool); ok && !lb {
 		return false, nil
 	}
 	rightVal, err := binop.Right.Eval(intp)
 	if err != nil {
 		return nil, err
 	}
-	_, rightNull := rightVal.(*NullValue)
-	if !rightNull && !boolValue(rightVal) {
+	if rb, ok := rightVal.(bool); ok && !rb {
 		return false, nil
 	}
-	if leftNull || rightNull {
-		return Null, nil
+	lb, lok := leftVal.(bool)
+	rb, rok := rightVal.(bool)
+	if lok && rok {
+		return lb && rb, nil
 	}
-	return true, nil
+	return Null, nil
 }
 
 func (binop Binop) orOp(intp *Interpreter) (any, error) {
@@ -530,22 +577,22 @@ func (binop Binop) orOp(intp *Interpreter) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, leftNull := leftVal.(*NullValue)
-	if !leftNull && boolValue(leftVal) {
+	if lb, ok := leftVal.(bool); ok && lb {
 		return true, nil
 	}
 	rightVal, err := binop.Right.Eval(intp)
 	if err != nil {
 		return nil, err
 	}
-	_, rightNull := rightVal.(*NullValue)
-	if !rightNull && boolValue(rightVal) {
+	if rb, ok := rightVal.(bool); ok && rb {
 		return true, nil
 	}
-	if leftNull || rightNull {
-		return Null, nil
+	lb, lok := leftVal.(bool)
+	rb, rok := rightVal.(bool)
+	if lok && rok {
+		return lb || rb, nil
 	}
-	return false, nil
+	return Null, nil
 }
 
 func (binop Binop) indexAtOp(intp *Interpreter) (any, error) {
@@ -553,39 +600,57 @@ func (binop Binop) indexAtOp(intp *Interpreter) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	rightVal, err := binop.Right.Eval(intp)
-	if err != nil {
-		return nil, err
+	// A speculative, scope-free evaluation of the right side just to see
+	// whether this is a numeric index (`list[1]`) or a filter predicate
+	// (`list[item.a >= 2]`). Filter predicates typically reference "item"
+	// or other per-element bindings that don't exist yet here, so errors
+	// are expected and simply mean "not a number index" — the predicate
+	// gets evaluated for real, per element, in filterList below.
+	rightVal, rightErr := binop.Right.Eval(intp)
+	if rightErr != nil {
+		rightVal = nil
 	}
+	// filterList evaluates binop.Right per element of an implicit list
+	// (binding "item" to the current element, plus its fields when it's a
+	// context) and returns the elements for which the predicate is true.
+	filterList := func(elems []any) (any, error) {
+		var result []any
+		for _, elem := range elems {
+			scope := Scope{"item": elem}
+			if mapElem, ok := elem.(map[string]any); ok {
+				for k, val := range mapElem {
+					scope[k] = val
+				}
+			}
+			intp.Push(scope)
+			r, err := binop.Right.Eval(intp)
+			intp.Pop()
+			if err != nil {
+				continue
+			}
+			if boolValue(r) {
+				result = append(result, elem)
+			}
+		}
+		if result == nil {
+			return []any{}, nil
+		}
+		return result, nil
+	}
+
 	switch v := leftVal.(type) {
 	case []any:
 		if nRight, ok := rightVal.(*Number); ok {
 			at := nRight.Int()
+			if at < 0 {
+				at = len(v) + at + 1
+			}
 			if at <= 0 || at > len(v) {
-				return nil, NewErrIndex("index out of range")
+				return Null, nil
 			}
 			return v[at-1], nil
-		} else {
-			// filter expression: re-evaluate right side per element with element context
-			var result []any
-			for _, elem := range v {
-				if mapElem, ok := elem.(map[string]any); ok {
-					intp.Push(mapElem)
-					r, err := binop.Right.Eval(intp)
-					intp.Pop()
-					if err != nil {
-						continue
-					}
-					if boolValue(r) {
-						result = append(result, elem)
-					}
-				}
-			}
-			if result == nil {
-				return []any{}, nil
-			}
-			return result, nil
 		}
+		return filterList(v)
 	case map[string]any:
 		if strRight, ok := rightVal.(string); ok {
 			if elem, ok := v[strRight]; ok {
@@ -594,6 +659,12 @@ func (binop Binop) indexAtOp(intp *Interpreter) (any, error) {
 				//return nil, NewEvalError(-3201, "key not found")
 				return nil, NewErrKeyNotFound(strRight)
 			}
+		} else if nRight, ok := rightVal.(*Number); ok {
+			// A context behaves as an implicit singleton list: ctx[1] == ctx.
+			if nRight.Int() == 1 {
+				return leftVal, nil
+			}
+			return Null, nil
 		} else {
 			//return nil, NewEvalError(-3200, "non string index")
 			return nil, NewErrIndex("non string index")
@@ -601,13 +672,16 @@ func (binop Binop) indexAtOp(intp *Interpreter) (any, error) {
 	default:
 		// A scalar behaves as an implicit singleton list: x[1] == x.
 		if nRight, ok := rightVal.(*Number); ok {
-			if nRight.Int() == 1 {
+			at := nRight.Int()
+			if at < 0 {
+				at = 1 + at + 1
+			}
+			if at == 1 {
 				return leftVal, nil
 			}
-			return nil, NewErrIndex("index out of range")
+			return Null, nil
 		}
-		//return nil, NewEvalError(-3202, "non indexable value")
-		return nil, NewErrIndex("non-indexable value")
+		return filterList([]any{leftVal})
 	}
 }
 

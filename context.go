@@ -1,6 +1,9 @@
 package feel
 
-import "maps"
+import (
+	"maps"
+	"sort"
+)
 
 func contextGetByKeys(ctx map[string]any, keys []string) (any, bool) {
 	for i, key := range keys {
@@ -80,50 +83,56 @@ func contextPutKeys(ctx map[string]any, keys []string, value any) (map[string]an
 
 func installContextFunctions(prelude *Prelude) {
 	// context/map functions
+	// "context" is the DMN 1.3+ parameter name; "m" is an older alias some
+	// TCK cases still use.
 	prelude.Bind("get value", NewNativeFunc(func(kwargs map[string]any) (any, error) {
-		type getvalueByKey struct {
-			Context map[string]any `json:"context"`
-			Key     string         `json:"key"`
+		ctx, ok := kwargs["context"].(map[string]any)
+		if !ok {
+			return Null, nil
+		}
+		keyArg, ok := kwargs["key"]
+		if !ok {
+			return Null, nil
 		}
 
-		type getvalueByKeys struct {
-			Context map[string]any `json:"context"`
-			Keys    []string       `json:"key"`
-		}
-
-		argsByKey := getvalueByKey{}
-
-		if err := decodeKWArgs(kwargs, &argsByKey); err != nil {
-			argsByKeys := getvalueByKeys{}
-			if err := decodeKWArgs(kwargs, &argsByKeys); err != nil {
-				return nil, err
-			}
-
-			if v, ok := contextGetByKeys(argsByKeys.Context, argsByKeys.Keys); ok {
+		if key, ok := keyArg.(string); ok {
+			if v, ok := ctx[key]; ok {
 				return v, nil
-			} else {
-				return Null, nil
 			}
-		} else {
-			if v, ok := argsByKey.Context[argsByKey.Key]; ok {
-				return v, nil
-			} else {
-				return Null, nil
-			}
+			return Null, nil
 		}
-	}).Required("context", "key"))
+		if keyList, ok := keyArg.([]any); ok {
+			keys := make([]string, len(keyList))
+			for i, k := range keyList {
+				s, ok := k.(string)
+				if !ok {
+					return Null, nil
+				}
+				keys[i] = s
+			}
+			if v, ok := contextGetByKeys(ctx, keys); ok {
+				return v, nil
+			}
+			return Null, nil
+		}
+		return Null, nil
+	}).Required("context", "key").Alias("context", "m"))
 
 	prelude.Bind("get entries", wrapTyped(func(ctx map[string]any) ([](map[string]any), error) {
-		entries := make([](map[string]any), 0)
-		for k, v := range ctx {
-			ent := map[string]any{
+		keys := make([]string, 0, len(ctx))
+		for k := range ctx {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		entries := make([](map[string]any), 0, len(keys))
+		for _, k := range keys {
+			entries = append(entries, map[string]any{
 				"key":   k,
-				"value": v,
-			}
-			entries = append(entries, ent)
+				"value": ctx[k],
+			})
 		}
 		return entries, nil
-	}).Required("context"))
+	}).Required("context").Alias("context", "m"))
 
 	prelude.Bind("context put", NewNativeFunc(func(kwargs map[string]any) (any, error) {
 		type putByKey struct {

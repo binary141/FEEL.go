@@ -7,7 +7,6 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"math"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 )
@@ -237,26 +236,62 @@ func installBuiltinFunctions(prelude *Prelude) {
 
 	prelude.Bind("number", NewNativeFunc(func(args map[string]any) (any, error) {
 		fromVal := args["from"]
-		groupSep, hasGroupSep := args["grouping separator"]
-		decSep, hasDecSep := args["decimal separator"]
-		if hasGroupSep || hasDecSep {
-			fromStr, ok := fromVal.(string)
-			if !ok {
-				return Null, nil
+
+		parseSep := func(argName string) (sep string, has bool, ok bool) {
+			v, present := args[argName]
+			if !present {
+				return "", false, true
 			}
-			groupSepStr, ok := groupSep.(string)
-			if !ok {
-				return Null, nil
+			if _, isNull := v.(*NullValue); isNull {
+				return "", false, true
 			}
-			decSepStr, ok := decSep.(string)
-			if !ok {
-				return Null, nil
+			s, isStr := v.(string)
+			if !isStr {
+				return "", false, false
 			}
-			s := strings.ReplaceAll(strings.TrimSpace(fromStr), groupSepStr, "")
-			s = strings.ReplaceAll(s, decSepStr, ".")
-			return NewNumber(s), nil
+			return s, true, true
 		}
-		return ParseNumberWithErr(fromVal)
+
+		groupSep, hasGroupSep, ok := parseSep("grouping separator")
+		if !ok {
+			return Null, nil
+		}
+		decSep, hasDecSep, ok := parseSep("decimal separator")
+		if !ok {
+			return Null, nil
+		}
+
+		if !hasGroupSep && !hasDecSep {
+			return ParseNumberWithErr(fromVal)
+		}
+
+		fromStr, ok := fromVal.(string)
+		if !ok {
+			return Null, nil
+		}
+		if hasGroupSep && groupSep != " " && groupSep != "," && groupSep != "." {
+			return Null, nil
+		}
+		if hasDecSep && decSep != "," && decSep != "." {
+			return Null, nil
+		}
+		if hasGroupSep && hasDecSep && groupSep == decSep {
+			return Null, nil
+		}
+
+		s := strings.TrimSpace(fromStr)
+		if hasGroupSep {
+			s = strings.ReplaceAll(s, groupSep, "")
+		}
+		if hasDecSep && decSep != "." {
+			s = strings.ReplaceAll(s, decSep, ".")
+		}
+
+		d := new(apd.Decimal)
+		if _, _, err := d.SetString(s); err != nil {
+			return Null, nil
+		}
+		return &Number{v: d}, nil
 	}).Required("from").Optional("grouping separator", "decimal separator"))
 
 	// numeric functions
@@ -377,10 +412,11 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err != nil {
 			return nil, err
 		}
-		if _, isNull := v.(*NullValue); isNull {
+		b, ok := v.(bool)
+		if !ok {
 			return Null, nil
 		}
-		return !boolValue(v), nil
+		return !b, nil
 	}).Required("from"))
 
 	prelude.Bind("is defined", NewMacro(func(intp *Interpreter, args map[string]Node, varArgs []Node) (any, error) {
@@ -494,6 +530,19 @@ func installBuiltinFunctions(prelude *Prelude) {
 		return re.ReplaceAllString(s, replacement), nil
 	}).Required("input", "pattern", "replacement"))
 
+	prelude.Bind("split", wrapTyped(func(s string, delimiter string) ([]any, error) {
+		re, err := regexp.Compile(delimiter)
+		if err != nil {
+			return nil, err
+		}
+		parts := re.Split(s, -1)
+		result := make([]any, len(parts))
+		for i, p := range parts {
+			result[i] = p
+		}
+		return result, nil
+	}).Required("string", "delimiter"))
+
 	// list functions
 	prelude.Bind("list contains", wrapTyped(func(list []any, elem any) (bool, error) {
 		for _, entry := range list {
@@ -600,52 +649,54 @@ func installBuiltinFunctions(prelude *Prelude) {
 		return r, nil
 	}).Vararg("list"))
 
-	prelude.Bind("stddev", NewNativeFunc(func(args map[string]any) (any, error) {
+	// numericVarArgList extracts the "list" vararg and requires every
+	// element to be a number; ok is false if the list couldn't be
+	// extracted (bad kwarg name, etc.) or contains a non-number entry
+	// (including null), matching FEEL's "invalid element makes the whole
+	// aggregate null" semantics.
+	numericVarArgList := func(args map[string]any) (nums []*Number, ok bool) {
 		list, err := extractList(args, "list")
 		if err != nil {
-			return nil, err
+			return nil, false
 		}
-		sum := 0.0
-		cnt := 0
+		nums = make([]*Number, 0, len(list))
 		for _, entry := range list {
-			if numEntry, ok := entry.(*Number); ok {
-				//sum = sum.Add(numEntry)
-				sum += numEntry.Float64()
-				cnt++
+			n, isNum := entry.(*Number)
+			if !isNum {
+				return nil, false
 			}
+			nums = append(nums, n)
 		}
-		if cnt == 0 {
-			return 0, nil
+		return nums, true
+	}
+
+	prelude.Bind("stddev", NewNativeFunc(func(args map[string]any) (any, error) {
+		numberList, ok := numericVarArgList(args)
+		if !ok || len(numberList) < 2 {
+			return Null, nil
 		}
 
-		avg := sum / float64(cnt)
+		sum := 0.0
+		for _, n := range numberList {
+			sum += n.Float64()
+		}
+		avg := sum / float64(len(numberList))
 
 		dev := 0.0
-		for _, entry := range list {
-			if numEntry, ok := entry.(*Number); ok {
-				n := numEntry.Float64()
-				dev += (n - avg) * (n - avg)
-			}
+		for _, n := range numberList {
+			v := n.Float64()
+			dev += (v - avg) * (v - avg)
 		}
 
-		return math.Sqrt(dev / float64(cnt)), nil
+		return math.Sqrt(dev / float64(len(numberList)-1)), nil
 	}).Vararg("list"))
 
 	prelude.Bind("median", NewNativeFunc(func(args map[string]any) (any, error) {
-		list, err := extractList(args, "list")
-		if err != nil {
-			return nil, err
+		numberList, ok := numericVarArgList(args)
+		if !ok || len(numberList) == 0 {
+			return Null, nil
 		}
-		var numberList []*Number
-
-		for _, entry := range list {
-			if numEntry, ok := entry.(*Number); ok {
-				numberList = append(numberList, numEntry)
-			}
-		}
-		if len(numberList) == 0 {
-			return nil, nil
-		} else if len(numberList) == 1 {
+		if len(numberList) == 1 {
 			return numberList[0], nil
 		}
 
@@ -655,59 +706,104 @@ func installBuiltinFunctions(prelude *Prelude) {
 
 		if len(numberList)%2 == 1 {
 			return numberList[len(numberList)/2], nil
-		} else {
-			medPos := (len(numberList) / 2)
-			return numberList[medPos+1].Add(numberList[medPos]).Mul(N("0.5")), nil
 		}
+		medPos := len(numberList) / 2
+		return numberList[medPos].Add(numberList[medPos-1]).Mul(N("0.5")), nil
 	}).Vararg("list"))
 
-	prelude.Bind("all", NewNativeFunc(func(args map[string]any) (any, error) {
+	prelude.Bind("mode", NewNativeFunc(func(args map[string]any) (any, error) {
+		numberList, ok := numericVarArgList(args)
+		if !ok {
+			return Null, nil
+		}
+		if len(numberList) == 0 {
+			return []any{}, nil
+		}
+
+		sort.Slice(numberList, func(i, j int) bool {
+			return numberList[i].Compare(*numberList[j]) == -1
+		})
+
+		bestCount := 0
+		var modes []*Number
+		i := 0
+		for i < len(numberList) {
+			j := i + 1
+			for j < len(numberList) && numberList[j].Compare(*numberList[i]) == 0 {
+				j++
+			}
+			count := j - i
+			switch {
+			case count > bestCount:
+				bestCount = count
+				modes = []*Number{numberList[i]}
+			case count == bestCount:
+				modes = append(modes, numberList[i])
+			}
+			i = j
+		}
+
+		result := make([]any, len(modes))
+		for i, m := range modes {
+			result[i] = m
+		}
+		return result, nil
+	}).Vararg("list"))
+
+	// allValues implements the FEEL three-valued "all" semantics: a false
+	// anywhere wins outright; otherwise any non-boolean (including null)
+	// makes the result unknown (null) rather than true.
+	allValues := func(args map[string]any) (any, error) {
 		list, err := extractList(args, "list")
 		if err != nil {
-			return nil, err
+			return Null, nil
 		}
+		sawNonBool := false
 		for _, v := range list {
-			if !boolValue(v) {
+			b, ok := v.(bool)
+			if !ok {
+				sawNonBool = true
+				continue
+			}
+			if !b {
 				return false, nil
 			}
 		}
+		if sawNonBool {
+			return Null, nil
+		}
 		return true, nil
-	}).Vararg("list"))
+	}
 
-	prelude.Bind("and", NewNativeFunc(func(args map[string]any) (any, error) {
+	// anyValues implements the FEEL three-valued "any" semantics: a true
+	// anywhere wins outright; otherwise any non-boolean (including null)
+	// makes the result unknown (null) rather than false.
+	anyValues := func(args map[string]any) (any, error) {
 		list, err := extractList(args, "list")
 		if err != nil {
-			return nil, err
+			return Null, nil
 		}
+		sawNonBool := false
 		for _, v := range list {
-			if !boolValue(v) {
-				return false, nil
+			b, ok := v.(bool)
+			if !ok {
+				sawNonBool = true
+				continue
+			}
+			if b {
+				return true, nil
 			}
 		}
-		return true, nil
-	}).Vararg("list"))
-
-	prelude.Bind("any", NewNativeFunc(func(args map[string]any) (any, error) {
-		list, err := extractList(args, "list")
-		if err != nil {
-			return nil, err
-		}
-		if slices.ContainsFunc(list, boolValue) {
-			return true, nil
+		if sawNonBool {
+			return Null, nil
 		}
 		return false, nil
-	}).Vararg("list"))
+	}
 
-	prelude.Bind("or", NewNativeFunc(func(args map[string]any) (any, error) {
-		list, err := extractList(args, "list")
-		if err != nil {
-			return nil, err
-		}
-		if slices.ContainsFunc(list, boolValue) {
-			return true, nil
-		}
-		return false, nil
-	}).Vararg("list"))
+	prelude.Bind("all", NewNativeFunc(allValues).Vararg("list"))
+	prelude.Bind("and", NewNativeFunc(allValues).Vararg("list"))
+	prelude.Bind("any", NewNativeFunc(anyValues).Vararg("list"))
+	prelude.Bind("or", NewNativeFunc(anyValues).Vararg("list"))
 
 	prelude.Bind("sublist", NewNativeFunc(func(kwargs map[string]any) (any, error) {
 		type sublistArgs struct {
@@ -1038,6 +1134,94 @@ func installBuiltinFunctions(prelude *Prelude) {
 			return Null, nil
 		}
 		return roundDown(n, scale), nil
+	}).Optional("n", "scale").Vararg("__extra"))
+
+	prelude.Bind("decimal", NewNativeFunc(func(args map[string]any) (any, error) {
+		_, hasExtra := args["__extra"]
+		nVal, hasN := args["n"]
+		scaleVal, hasScale := args["scale"]
+		if !hasN || !hasScale || hasExtra {
+			return Null, nil
+		}
+		if _, isNull := nVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		if _, isNull := scaleVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		n, ok := nVal.(*Number)
+		if !ok {
+			return Null, nil
+		}
+		scaleNum, ok := scaleVal.(*Number)
+		if !ok {
+			return Null, nil
+		}
+		scale := scaleNum.Int64()
+		if scale < -6111 || scale > 6176 {
+			return Null, nil
+		}
+		return quantize(n, scale, apd.RoundHalfEven), nil
+	}).Optional("n", "scale").Vararg("__extra"))
+
+	prelude.Bind("floor", NewNativeFunc(func(args map[string]any) (any, error) {
+		_, hasExtra := args["__extra"]
+		nVal, hasN := args["n"]
+		if !hasN || hasExtra {
+			return Null, nil
+		}
+		if _, isNull := nVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		n, ok := nVal.(*Number)
+		if !ok {
+			return Null, nil
+		}
+		scale := int64(0)
+		if scaleVal, hasScale := args["scale"]; hasScale {
+			if _, isNull := scaleVal.(*NullValue); isNull {
+				return Null, nil
+			}
+			scaleNum, ok := scaleVal.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			scale = scaleNum.Int64()
+			if scale < -6111 || scale > 6176 {
+				return Null, nil
+			}
+		}
+		return quantize(n, scale, apd.RoundFloor), nil
+	}).Optional("n", "scale").Vararg("__extra"))
+
+	prelude.Bind("ceiling", NewNativeFunc(func(args map[string]any) (any, error) {
+		_, hasExtra := args["__extra"]
+		nVal, hasN := args["n"]
+		if !hasN || hasExtra {
+			return Null, nil
+		}
+		if _, isNull := nVal.(*NullValue); isNull {
+			return Null, nil
+		}
+		n, ok := nVal.(*Number)
+		if !ok {
+			return Null, nil
+		}
+		scale := int64(0)
+		if scaleVal, hasScale := args["scale"]; hasScale {
+			if _, isNull := scaleVal.(*NullValue); isNull {
+				return Null, nil
+			}
+			scaleNum, ok := scaleVal.(*Number)
+			if !ok {
+				return Null, nil
+			}
+			scale = scaleNum.Int64()
+			if scale < -6111 || scale > 6176 {
+				return Null, nil
+			}
+		}
+		return quantize(n, scale, apd.RoundCeiling), nil
 	}).Optional("n", "scale").Vararg("__extra"))
 
 	prelude.Bind("list replace", NewMacro(func(intp *Interpreter, args map[string]Node, varArgs []Node) (any, error) {

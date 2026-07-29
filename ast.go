@@ -342,7 +342,13 @@ type ForExpr struct {
 	Varname    string
 	ListExpr   Node
 	ReturnExpr Node
-	textRange  TextRange
+	// Chained is true when this node was produced by a comma-separated
+	// "for a in X, b in Y return Z" clause, as opposed to a literal nested
+	// "for" expression written as the return expression. Chained clauses
+	// form a cartesian product flattened into a single result list; a
+	// genuinely nested "for" produces a nested list.
+	Chained   bool
+	textRange TextRange
 }
 
 func (node ForExpr) TextRange() TextRange {

@@ -23,6 +23,21 @@ func interfaceToValue(a any, outputType reflect.Type) (reflect.Value, error) {
 		}
 		return v, nil
 	}
+	// FEEL semantics: a singleton list may be used wherever the single value
+	// it contains is expected.
+	if outputType.Kind() != reflect.Slice && outputType.Kind() != reflect.Array {
+		if list, ok := a.([]any); ok && len(list) == 1 {
+			a = list[0]
+		}
+	}
+	// A FEEL null (or a Go nil) is never a valid value for a concretely
+	// typed parameter; mapstructure would otherwise happily decode it into
+	// a zero-valued struct/map, masking a type mismatch that should
+	// surface as null instead.
+	if _, isNull := a.(*NullValue); isNull || a == nil {
+		return reflect.Value{}, fmt.Errorf("cannot use null as type %s", outputType)
+	}
+
 	output := reflect.Zero(outputType).Interface()
 	config := &mapstructure.DecoderConfig{
 		Metadata: nil,
