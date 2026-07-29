@@ -255,6 +255,57 @@ func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op
 				return v.Sub(rightTime), nil
 			}
 		}
+	case *FEELDate:
+		if op == "+" {
+			if rightDur, ok := rightVal.(*FEELDuration); ok {
+				return v.Add(rightDur), nil
+			}
+		} else if op == "-" {
+			if rightDur, ok := rightVal.(*FEELDuration); ok {
+				return v.Add(rightDur.Negative()), nil
+			} else if rightDate, ok := rightVal.(*FEELDate); ok {
+				return v.Sub(rightDate), nil
+			}
+		}
+	case *FEELTime:
+		if op == "+" {
+			if rightDur, ok := rightVal.(*FEELDuration); ok {
+				return v.Add(rightDur), nil
+			}
+		} else if op == "-" {
+			if rightDur, ok := rightVal.(*FEELDuration); ok {
+				return v.Add(rightDur.Negative()), nil
+			} else if rightTime, ok := rightVal.(*FEELTime); ok {
+				return v.Sub(rightTime), nil
+			}
+		}
+	case *FEELDuration:
+		if rightDur, ok := rightVal.(*FEELDuration); ok {
+			if op == "+" {
+				result, err := v.Add(rightDur)
+				if err != nil {
+					return Null, nil
+				}
+				return result, nil
+			} else if op == "-" {
+				result, err := v.Sub(rightDur)
+				if err != nil {
+					return Null, nil
+				}
+				return result, nil
+			}
+		}
+		if op == "+" {
+			if rightDate, ok := rightVal.(*FEELDate); ok {
+				return rightDate.Add(v), nil
+			}
+			if rightTime, ok := rightVal.(*FEELTime); ok {
+				return rightTime.Add(v), nil
+			}
+			if rightDT, ok := rightVal.(*FEELDatetime); ok {
+				return rightDT.Add(v), nil
+			}
+		}
 	}
 	//return nil, NewEvalError(-3101, "invalid types", fmt.Sprintf("bad types in op, %s %s %s", typeName(leftVal), op, typeName(rightVal)))
 	return nil, NewErrBadOp(typeName(leftVal), op, typeName(rightVal))
@@ -278,10 +329,42 @@ func (binop Binop) subOp(intp *Interpreter) (any, error) {
 }
 
 func (binop Binop) mulOp(intp *Interpreter) (any, error) {
-	return binop.numberOp(
-		intp,
-		func(a, b *Number) any { return a.Mul(b) },
-		"*")
+	leftVal, err := binop.Left.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	rightVal, err := binop.Right.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := leftVal.(*NullValue); ok {
+		return Null, nil
+	}
+	if _, ok := rightVal.(*NullValue); ok {
+		return Null, nil
+	}
+	if leftNumber, ok := leftVal.(*Number); ok {
+		if rightNumber, ok := rightVal.(*Number); ok {
+			return leftNumber.Mul(rightNumber), nil
+		}
+		if rightDur, ok := rightVal.(*FEELDuration); ok {
+			result, err := rightDur.MulNumber(leftNumber)
+			if err != nil {
+				return Null, nil
+			}
+			return result, nil
+		}
+	}
+	if leftDur, ok := leftVal.(*FEELDuration); ok {
+		if rightNumber, ok := rightVal.(*Number); ok {
+			result, err := leftDur.MulNumber(rightNumber)
+			if err != nil {
+				return Null, nil
+			}
+			return result, nil
+		}
+	}
+	return nil, NewErrBadOp(typeName(leftVal), "*", typeName(rightVal))
 }
 
 func (binop Binop) powOp(intp *Interpreter) (any, error) {
@@ -302,15 +385,45 @@ func (binop Binop) powOp(intp *Interpreter) (any, error) {
 }
 
 func (binop Binop) divOp(intp *Interpreter) (any, error) {
-	return binop.numberOp(
-		intp,
-		func(a, b *Number) any {
-			if b.IsZero() {
-				return Null
+	leftVal, err := binop.Left.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	rightVal, err := binop.Right.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := leftVal.(*NullValue); ok {
+		return Null, nil
+	}
+	if _, ok := rightVal.(*NullValue); ok {
+		return Null, nil
+	}
+	if leftNumber, ok := leftVal.(*Number); ok {
+		if rightNumber, ok := rightVal.(*Number); ok {
+			if rightNumber.IsZero() {
+				return Null, nil
 			}
-			return a.FloatDiv(b)
-		},
-		"/")
+			return leftNumber.FloatDiv(rightNumber), nil
+		}
+	}
+	if leftDur, ok := leftVal.(*FEELDuration); ok {
+		if rightNumber, ok := rightVal.(*Number); ok {
+			result, err := leftDur.DivNumber(rightNumber)
+			if err != nil {
+				return Null, nil
+			}
+			return result, nil
+		}
+		if rightDur, ok := rightVal.(*FEELDuration); ok {
+			result, err := leftDur.DivDuration(rightDur)
+			if err != nil {
+				return Null, nil
+			}
+			return result, nil
+		}
+	}
+	return nil, NewErrBadOp(typeName(leftVal), "/", typeName(rightVal))
 }
 
 func (binop Binop) compareGTOp(intp *Interpreter) (any, error) {
@@ -486,6 +599,13 @@ func (binop Binop) indexAtOp(intp *Interpreter) (any, error) {
 			return nil, NewErrIndex("non string index")
 		}
 	default:
+		// A scalar behaves as an implicit singleton list: x[1] == x.
+		if nRight, ok := rightVal.(*Number); ok {
+			if nRight.Int() == 1 {
+				return leftVal, nil
+			}
+			return nil, NewErrIndex("index out of range")
+		}
 		//return nil, NewEvalError(-3202, "non indexable value")
 		return nil, NewErrIndex("non-indexable value")
 	}

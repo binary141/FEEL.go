@@ -149,6 +149,56 @@ func (number *Number) IntMod(other *Number) *Number {
 	return &Number{v: result}
 }
 
+func (number *Number) Abs() *Number {
+	result := new(apd.Decimal)
+	decimal128Context.Abs(result, number.v) //nolint:errcheck
+	return &Number{v: result}
+}
+
+func (number *Number) Neg() *Number {
+	result := new(apd.Decimal)
+	decimal128Context.Neg(result, number.v) //nolint:errcheck
+	return &Number{v: result}
+}
+
+func (number *Number) Sqrt() (*Number, error) {
+	result := new(apd.Decimal)
+	if _, err := decimal128Context.Sqrt(result, number.v); err != nil {
+		return nil, err
+	}
+	return &Number{v: result}, nil
+}
+
+func (number *Number) Exp() (*Number, error) {
+	result := new(apd.Decimal)
+	if _, err := decimal128Context.Exp(result, number.v); err != nil {
+		return nil, err
+	}
+	return &Number{v: result}, nil
+}
+
+func (number *Number) Ln() (*Number, error) {
+	result := new(apd.Decimal)
+	if _, err := decimal128Context.Ln(result, number.v); err != nil {
+		return nil, err
+	}
+	return &Number{v: result}, nil
+}
+
+// Modulo implements FEEL's modulo semantics: the result has the same sign as
+// the divisor (unlike Go's/apd's Rem, which follows the dividend's sign).
+func (number *Number) Modulo(divisor *Number) (*Number, error) {
+	if divisor.IsZero() {
+		return nil, errors.New("division by zero")
+	}
+	result := new(apd.Decimal)
+	decimal128Context.Rem(result, number.v, divisor.v) //nolint:errcheck
+	if !result.IsZero() && (result.Negative != divisor.v.Negative) {
+		decimal128Context.Add(result, result, divisor.v) //nolint:errcheck
+	}
+	return &Number{v: result}, nil
+}
+
 func (number Number) Equal(other Number) bool {
 	return number.Compare(other) == 0
 }

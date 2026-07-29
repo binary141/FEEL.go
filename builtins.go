@@ -12,6 +12,64 @@ import (
 	"strings"
 )
 
+func timeIsEqual(ta HasTime, kindA int, nameA string, tb HasTime, kindB int, nameB string) bool {
+	a, b := ta.Time(), tb.Time()
+	if a.Year() != b.Year() || a.Month() != b.Month() || a.Day() != b.Day() ||
+		a.Hour() != b.Hour() || a.Minute() != b.Minute() || a.Second() != b.Second() || a.Nanosecond() != b.Nanosecond() {
+		return false
+	}
+	if kindA != kindB {
+		return false
+	}
+	switch kindA {
+	case zoneOffset:
+		_, offA := a.Zone()
+		_, offB := b.Zone()
+		return offA == offB
+	case zoneNamed:
+		return nameA == nameB
+	default:
+		return true
+	}
+}
+
+func feelIs(a, b any) bool {
+	switch va := a.(type) {
+	case *NullValue:
+		_, ok := b.(*NullValue)
+		return ok
+	case *Number:
+		vb, ok := b.(*Number)
+		return ok && va.Equal(*vb)
+	case string:
+		vb, ok := b.(string)
+		return ok && va == vb
+	case bool:
+		vb, ok := b.(bool)
+		return ok && va == vb
+	case *FEELDate:
+		vb, ok := b.(*FEELDate)
+		return ok && va.t.Equal(vb.t)
+	case *FEELTime:
+		vb, ok := b.(*FEELTime)
+		return ok && timeIsEqual(va, va.zoneKind, va.zoneName, vb, vb.zoneKind, vb.zoneName)
+	case *FEELDatetime:
+		vb, ok := b.(*FEELDatetime)
+		return ok && timeIsEqual(va, va.zoneKind, va.zoneName, vb, vb.zoneKind, vb.zoneName)
+	case *FEELDuration:
+		vb, ok := b.(*FEELDuration)
+		if !ok || va.IsYM != vb.IsYM {
+			return false
+		}
+		if va.IsYM {
+			return va.TotalMonths() == vb.TotalMonths()
+		}
+		return va.Duration() == vb.Duration()
+	default:
+		return false
+	}
+}
+
 func toFEELIndex(idx int) int {
 	return idx + 1
 }
@@ -200,6 +258,118 @@ func installBuiltinFunctions(prelude *Prelude) {
 		}
 		return ParseNumberWithErr(fromVal)
 	}).Required("from").Optional("grouping separator", "decimal separator"))
+
+	// numeric functions
+	prelude.Bind("abs", NewNativeFunc(func(args map[string]any) (any, error) {
+		v, ok := args["n"]
+		if !ok {
+			return Null, nil
+		}
+		switch vv := v.(type) {
+		case *Number:
+			return vv.Abs(), nil
+		case *FEELDuration:
+			newDur := *vv
+			newDur.Neg = false
+			return &newDur, nil
+		default:
+			return Null, nil
+		}
+	}).Required("n"))
+
+	prelude.Bind("sqrt", NewNativeFunc(func(args map[string]any) (any, error) {
+		n, ok := args["number"].(*Number)
+		if !ok {
+			return Null, nil
+		}
+		if n.Cmp(Zero) < 0 {
+			return Null, nil
+		}
+		result, err := n.Sqrt()
+		if err != nil {
+			return Null, nil
+		}
+		return result, nil
+	}).Required("number"))
+
+	prelude.Bind("exp", NewNativeFunc(func(args map[string]any) (any, error) {
+		n, ok := args["number"].(*Number)
+		if !ok {
+			return Null, nil
+		}
+		result, err := n.Exp()
+		if err != nil {
+			return Null, nil
+		}
+		return result, nil
+	}).Required("number"))
+
+	prelude.Bind("log", NewNativeFunc(func(args map[string]any) (any, error) {
+		n, ok := args["number"].(*Number)
+		if !ok {
+			return Null, nil
+		}
+		if n.Cmp(Zero) <= 0 {
+			return Null, nil
+		}
+		result, err := n.Ln()
+		if err != nil {
+			return Null, nil
+		}
+		return result, nil
+	}).Required("number"))
+
+	prelude.Bind("even", NewNativeFunc(func(args map[string]any) (any, error) {
+		n, ok := args["number"].(*Number)
+		if !ok {
+			return Null, nil
+		}
+		mod, err := n.Modulo(N(2))
+		if err != nil {
+			return Null, nil
+		}
+		return mod.IsZero(), nil
+	}).Required("number"))
+
+	prelude.Bind("odd", NewNativeFunc(func(args map[string]any) (any, error) {
+		n, ok := args["number"].(*Number)
+		if !ok {
+			return Null, nil
+		}
+		mod, err := n.Modulo(N(2))
+		if err != nil {
+			return Null, nil
+		}
+		return !mod.IsZero(), nil
+	}).Required("number"))
+
+	prelude.Bind("modulo", NewNativeFunc(func(args map[string]any) (any, error) {
+		dividend, ok := args["dividend"].(*Number)
+		if !ok {
+			return Null, nil
+		}
+		divisor, ok := args["divisor"].(*Number)
+		if !ok {
+			return Null, nil
+		}
+		result, err := dividend.Modulo(divisor)
+		if err != nil {
+			return Null, nil
+		}
+		return result, nil
+	}).Required("dividend", "divisor"))
+
+	prelude.Bind("is", NewNativeFunc(func(args map[string]any) (any, error) {
+		v1, ok1 := args["value1"]
+		if !ok1 {
+			v1 = Null
+		}
+		v2, ok2 := args["value2"]
+		if !ok2 {
+			v2 = Null
+		}
+		return feelIs(v1, v2), nil
+	}).Optional("value1", "value2"))
 
 	// boolean functions
 	prelude.Bind("not", NewMacro(func(intp *Interpreter, args map[string]Node, varArgs []Node) (any, error) {

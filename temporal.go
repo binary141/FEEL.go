@@ -23,10 +23,54 @@ type HasDate interface {
 	Date() time.Time
 }
 
+// zoneKind distinguishes how a time/date-time literal expressed its zone:
+// not at all, as a numeric offset (including "Z"), or as a named IANA zone
+// (e.g. "@Australia/Melbourne"). Two temporal values that represent the same
+// instant are only `is`-equal (and print identically) if their zone is
+// expressed the same way.
+const (
+	zoneNone = iota
+	zoneOffset
+	zoneNamed
+)
+
+var offsetSuffixPattern = regexp.MustCompile(`([+-])(\d{2}):(\d{2})(?::\d{2})?$`)
+
+// classifyZone inspects a raw temporal literal's text and reports how (if at
+// all) it expressed a time zone.
+func classifyZone(src string) (kind int, name string) {
+	if idx := strings.Index(src, "@"); idx >= 0 {
+		return zoneNamed, src[idx+1:]
+	}
+	if strings.HasSuffix(src, "Z") {
+		return zoneOffset, ""
+	}
+	if offsetSuffixPattern.MatchString(src) {
+		return zoneOffset, ""
+	}
+	return zoneNone, ""
+}
+
+// formatZoned renders t (already parsed with its clock fields intact) using
+// layout for the non-zone portion, then appends the appropriate zone suffix
+// for kind/name.
+func formatZoned(t time.Time, layout string, kind int, name string) string {
+	s := t.Format(layout)
+	switch kind {
+	case zoneNamed:
+		return s + "@" + name
+	case zoneOffset:
+		return s + t.Format("-07:00")
+	default:
+		return s
+	}
+}
+
 // time
 type FEELTime struct {
-	t   time.Time
-	src string
+	t        time.Time
+	zoneKind int
+	zoneName string
 }
 
 func (st FEELTime) Time() time.Time {
@@ -47,7 +91,21 @@ var timePatterns = []string{
 	"15:04:05",
 }
 
+// clockPrefixPattern requires exactly two digits each for hour, minute, and
+// second (FEEL/XSD time literals reject "7:00:00", unlike Go's time.Parse).
+var clockPrefixPattern = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}`)
+
+const maxZoneOffsetSeconds = 14 * 3600
+
+func validOffsetSeconds(t time.Time) bool {
+	_, offset := t.Zone()
+	return offset >= -maxZoneOffsetSeconds && offset <= maxZoneOffsetSeconds
+}
+
 func ParseTime(temporalStr string) (*FEELTime, error) {
+	if !clockPrefixPattern.MatchString(temporalStr) {
+		return nil, ErrParseTemporal
+	}
 	if atIdx := strings.Index(temporalStr, "@"); atIdx > 0 {
 		timePart := temporalStr[:atIdx]
 		tzName := temporalStr[atIdx+1:]
@@ -55,7 +113,7 @@ func ParseTime(temporalStr string) (*FEELTime, error) {
 			if loc, err := time.LoadLocation(tzName); err == nil {
 				for _, pat := range []string{"15:04:05.999999999", "15:04:05"} {
 					if t, err := time.ParseInLocation(pat, timePart, loc); err == nil {
-						return &FEELTime{t: t, src: temporalStr}, nil
+						return &FEELTime{t: t, zoneKind: zoneNamed, zoneName: tzName}, nil
 					}
 				}
 			}
@@ -64,7 +122,11 @@ func ParseTime(temporalStr string) (*FEELTime, error) {
 	}
 	for _, pat := range timePatterns {
 		if t, err := time.Parse(pat, temporalStr); err == nil {
-			return &FEELTime{t: t, src: temporalStr}, nil
+			if !validOffsetSeconds(t) {
+				return nil, ErrParseTemporal
+			}
+			kind, name := classifyZone(temporalStr)
+			return &FEELTime{t: t, zoneKind: kind, zoneName: name}, nil
 		}
 	}
 	return nil, ErrParseTemporal
@@ -93,10 +155,19 @@ func (st FEELTime) MarshalJSON() ([]byte, error) {
 }
 
 func (st FEELTime) String() string {
-	if st.src != "" {
-		return st.src
+	layout := "15:04:05"
+	if st.t.Nanosecond() != 0 {
+		layout = "15:04:05.999999999"
 	}
-	return st.t.Format("15:04:05-07:00")
+	return formatZoned(st.t, layout, st.zoneKind, st.zoneName)
+}
+
+func (st *FEELTime) Add(dur *FEELDuration) *FEELTime {
+	return &FEELTime{t: st.t.Add(dur.Duration()), zoneKind: st.zoneKind, zoneName: st.zoneName}
+}
+
+func (st *FEELTime) Sub(other HasTime) *FEELDuration {
+	return NewFEELDuration(st.t.Sub(other.Time()))
 }
 
 // Date
@@ -132,6 +203,25 @@ func (date FEELDate) MarshalJSON() ([]byte, error) {
 	return json.Marshal(date.String())
 }
 
+func (date *FEELDate) Add(dur *FEELDuration) *FEELDate {
+	if dur.IsYM {
+		durMonths := dur.TotalMonths()
+		totalMonths := int64(date.t.Year())*12 + int64(date.t.Month()-1) + durMonths
+		year := totalMonths / 12
+		month := totalMonths % 12
+		if month < 0 {
+			month += 12
+			year--
+		}
+		return &FEELDate{t: time.Date(int(year), time.Month(month+1), date.t.Day(), 0, 0, 0, 0, date.t.Location())}
+	}
+	return &FEELDate{t: date.t.Add(dur.Duration())}
+}
+
+func (date *FEELDate) Sub(other HasDate) *FEELDuration {
+	return NewFEELDuration(date.t.Sub(other.Date()))
+}
+
 var datePatterns = []string{
 	"2006-01-02",
 }
@@ -155,8 +245,9 @@ func ParseDate(timeStr string) (*FEELDate, error) {
 
 // Date and Time
 type FEELDatetime struct {
-	t   time.Time
-	src string
+	t        time.Time
+	zoneKind int
+	zoneName string
 }
 
 func (sdt FEELDatetime) Time() time.Time {
@@ -210,10 +301,11 @@ func (sdt FEELDatetime) MarshalJSON() ([]byte, error) {
 }
 
 func (sdt FEELDatetime) String() string {
-	if sdt.src != "" {
-		return sdt.src
+	layout := "2006-01-02T15:04:05"
+	if sdt.t.Nanosecond() != 0 {
+		layout = "2006-01-02T15:04:05.999999999"
 	}
-	return sdt.t.Format("2006-01-02T15:04:05@MST")
+	return formatZoned(sdt.t, layout, sdt.zoneKind, sdt.zoneName)
 }
 
 func (sdt *FEELDatetime) Add(dur *FEELDuration) *FEELDatetime {
@@ -231,9 +323,11 @@ func (sdt *FEELDatetime) Add(dur *FEELDuration) *FEELDatetime {
 				sdt.t.Day(), sdt.t.Hour(), sdt.t.Minute(),
 				sdt.t.Second(), sdt.t.Nanosecond(),
 				sdt.t.Location()),
+			zoneKind: sdt.zoneKind,
+			zoneName: sdt.zoneName,
 		}
 	}
-	return &FEELDatetime{t: sdt.t.Add(dur.Duration())}
+	return &FEELDatetime{t: sdt.t.Add(dur.Duration()), zoneKind: sdt.zoneKind, zoneName: sdt.zoneName}
 }
 
 func (sdt *FEELDatetime) Sub(v HasTime) *FEELDuration {
@@ -299,13 +393,16 @@ func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 		}
 		t := dt.t
 		negT := time.Date(-t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
-		return &FEELDatetime{t: negT, src: temporalStr}, nil
+		return &FEELDatetime{t: negT, zoneKind: dt.zoneKind, zoneName: dt.zoneName}, nil
 	}
 	// date-only: normalize to YYYY-MM-DDTHH:MM:SS
 	if matched, _ := regexp.MatchString(`^\d{4}-\d{2}-\d{2}$`, temporalStr); matched {
 		if t, err := time.Parse("2006-01-02", temporalStr); err == nil {
-			return &FEELDatetime{t: t, src: temporalStr + "T00:00:00"}, nil
+			return &FEELDatetime{t: t}, nil
 		}
+	}
+	if !datetimeClockPattern.MatchString(temporalStr) {
+		return nil, ErrParseTemporal
 	}
 	// @IANA timezone with slash or long name (e.g. Etc/UTC)
 	if atIdx := strings.LastIndex(temporalStr, "@"); atIdx > 10 {
@@ -315,11 +412,11 @@ func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 			if loc, err := time.LoadLocation(tzName); err == nil {
 				for _, pat := range []string{"2006-01-02T15:04:05.999999999", "2006-01-02T15:04:05"} {
 					if t, err := time.ParseInLocation(pat, dtPart, loc); err == nil {
-						return &FEELDatetime{t: t, src: temporalStr}, nil
+						return &FEELDatetime{t: t, zoneKind: zoneNamed, zoneName: tzName}, nil
 					}
 				}
 				if t, ok := parseLargeYearDatetime(dtPart, loc); ok {
-					return &FEELDatetime{t: t, src: temporalStr}, nil
+					return &FEELDatetime{t: t, zoneKind: zoneNamed, zoneName: tzName}, nil
 				}
 			}
 			return nil, ErrParseTemporal
@@ -327,11 +424,20 @@ func ParseDatetime(temporalStr string) (*FEELDatetime, error) {
 	}
 	for _, pat := range dateTimePatterns {
 		if t, err := time.Parse(pat, temporalStr); err == nil {
-			return &FEELDatetime{t: t, src: temporalStr}, nil
+			if !validOffsetSeconds(t) {
+				return nil, ErrParseTemporal
+			}
+			kind, name := classifyZone(temporalStr)
+			return &FEELDatetime{t: t, zoneKind: kind, zoneName: name}, nil
 		}
 	}
 	return nil, ErrParseTemporal
 }
+
+// datetimeClockPattern requires exactly two digits each for hour, minute,
+// and second following the "T" (FEEL/XSD datetime literals reject
+// "...T7:00:00", unlike Go's time.Parse).
+var datetimeClockPattern = regexp.MustCompile(`T\d{2}:\d{2}:\d{2}`)
 
 func MustParseDatetime(temporalStr string) *FEELDatetime {
 	t, err := ParseDatetime(temporalStr)
@@ -419,6 +525,65 @@ func (dur *FEELDuration) Negative() *FEELDuration {
 	neg := *dur
 	neg.Neg = !dur.Neg
 	return &neg
+}
+
+func (dur *FEELDuration) Add(other *FEELDuration) (*FEELDuration, error) {
+	if dur.IsYM != other.IsYM {
+		return nil, errors.New("cannot add year-month and day-time durations")
+	}
+	if dur.IsYM {
+		return NewYearMonthDuration(dur.TotalMonths() + other.TotalMonths()), nil
+	}
+	return NewFEELDuration(dur.Duration() + other.Duration()), nil
+}
+
+func (dur *FEELDuration) Sub(other *FEELDuration) (*FEELDuration, error) {
+	return dur.Add(other.Negative())
+}
+
+func (dur *FEELDuration) MulNumber(n *Number) (*FEELDuration, error) {
+	if dur.IsYM {
+		return NewYearMonthDuration(int64(float64(dur.TotalMonths()) * n.Float64())), nil
+	}
+	return NewFEELDuration(time.Duration(float64(dur.Duration()) * n.Float64())), nil
+}
+
+func (dur *FEELDuration) DivNumber(n *Number) (*FEELDuration, error) {
+	if n.IsZero() {
+		return nil, errors.New("division by zero")
+	}
+	if dur.IsYM {
+		return NewYearMonthDuration(int64(float64(dur.TotalMonths()) / n.Float64())), nil
+	}
+	return NewFEELDuration(time.Duration(float64(dur.Duration()) / n.Float64())), nil
+}
+
+func (dur *FEELDuration) DivDuration(other *FEELDuration) (*Number, error) {
+	if dur.IsYM != other.IsYM {
+		return nil, errors.New("cannot divide year-month and day-time durations")
+	}
+	if dur.IsYM {
+		if other.TotalMonths() == 0 {
+			return nil, errors.New("division by zero")
+		}
+		return NewNumberFromFloat(float64(dur.TotalMonths()) / float64(other.TotalMonths())), nil
+	}
+	if other.Duration() == 0 {
+		return nil, errors.New("division by zero")
+	}
+	return NewNumberFromFloat(float64(dur.Duration()) / float64(other.Duration())), nil
+}
+
+// NewYearMonthDuration builds a year-month duration from a total month count.
+func NewYearMonthDuration(totalMonths int64) *FEELDuration {
+	dur := &FEELDuration{IsYM: true}
+	if totalMonths < 0 {
+		dur.Neg = true
+		totalMonths = -totalMonths
+	}
+	dur.Years = int(totalMonths / 12)
+	dur.Months = int(totalMonths % 12)
+	return dur
 }
 
 func (dur FEELDuration) String() string {
@@ -553,15 +718,18 @@ func MustParseDuration(s string) *FEELDuration {
 }
 
 func ParseTemporalValue(temporalStr string) (any, error) {
+	// ParseDate is tried first and only matches a strict date-only literal
+	// (YYYY-MM-DD); ParseDatetime would otherwise also accept it (defaulting
+	// the time to midnight), which is wrong for a `@"..."` literal.
+	if v, err := ParseDate(temporalStr); err == nil {
+		return v, nil
+	}
+
 	if v, err := ParseDatetime(temporalStr); err == nil {
 		return v, nil
 	}
 
 	if v, err := ParseTime(temporalStr); err == nil {
-		return v, nil
-	}
-
-	if v, err := ParseDate(temporalStr); err == nil {
 		return v, nil
 	}
 
@@ -629,8 +797,7 @@ func installDatetimeFunctions(prelude *Prelude) {
 		d := hasDate.Date()
 		t := feelTime.t
 		combined := time.Date(d.Year(), d.Month(), d.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
-		src := fmt.Sprintf("%d-%02d-%02dT%s", d.Year(), d.Month(), d.Day(), feelTime.src)
-		return &FEELDatetime{t: combined, src: src}, nil
+		return &FEELDatetime{t: combined, zoneKind: feelTime.zoneKind, zoneName: feelTime.zoneName}, nil
 	}).Optional("from", "time").Vararg("__extra"))
 
 	prelude.Bind("duration", wrapTyped(func(frm string) (any, error) {
@@ -668,12 +835,6 @@ func installDatetimeFunctions(prelude *Prelude) {
 	prelude.Bind("month of year", wrapTyped(func(v HasDate) (any, error) {
 		return v.Date().Month(), nil
 	}).Required("date"))
-
-	prelude.Bind("abs", wrapTyped(func(dur *FEELDuration) (any, error) {
-		newDur := *dur
-		newDur.Neg = false
-		return newDur, nil
-	}).Required("dur"))
 
 	// refs https://docs.camunda.io/docs/components/modeler/feel/builtin-functions/feel-built-in-functions-temporal/#last-day-of-monthdate
 	prelude.Bind("last day of month", wrapTyped(func(v HasDate) (any, error) {

@@ -144,9 +144,10 @@ type tckInputNode struct {
 }
 
 type tckResultNode struct {
-	Name     string  `xml:"name,attr"`
-	Type     string  `xml:"type,attr"`
-	Expected tckNode `xml:"expected"`
+	Name        string  `xml:"name,attr"`
+	Type        string  `xml:"type,attr"`
+	ErrorResult bool    `xml:"errorResult,attr"`
+	Expected    tckNode `xml:"expected"`
 }
 
 // convertValue turns a TCK <value xsi:type="..."> into a Go/FEEL value.
@@ -169,6 +170,14 @@ func convertValue(v *tckValue) (any, error) {
 		return NewNumber(text), nil
 	case "string":
 		return v.Text, nil
+	case "date":
+		return ParseDate(text)
+	case "time":
+		return ParseTime(text)
+	case "dateTime":
+		return ParseDatetime(text)
+	case "duration", "dayTimeDuration", "yearMonthDuration":
+		return ParseDuration(text)
 	default:
 		return nil, fmt.Errorf("unsupported value type %q", v.Type)
 	}
@@ -226,7 +235,20 @@ func numbersApproxEqual(a, b *Number) bool {
 		tol = floor
 	}
 
-	return diff.Cmp(tol) <= 0
+	if diff.Cmp(tol) <= 0 {
+		return true
+	}
+
+	// The expected value may itself be given at reduced precision (e.g. an
+	// exp/log/sqrt reference truncated to 8 decimal places). If rounding our
+	// higher-precision result to that same scale matches exactly, accept it.
+	if b.v.Exponent < 0 {
+		rounded := new(apd.Decimal)
+		displayContext.Quantize(rounded, a.v, b.v.Exponent) //nolint:errcheck
+		return rounded.Cmp(b.v) == 0
+	}
+
+	return false
 }
 
 func valuesEqual(t *testing.T, expected tckNode, actual any) bool {
@@ -255,6 +277,18 @@ func deepValuesEqual(want, actual any) bool {
 	case string:
 		a, ok := actual.(string)
 		return ok && a == w
+	case *FEELDuration:
+		a, ok := actual.(*FEELDuration)
+		return ok && a.IsYearMonth() == w.IsYearMonth() && a.TotalMonths() == w.TotalMonths() && a.Duration() == w.Duration()
+	case *FEELDate:
+		a, ok := actual.(*FEELDate)
+		return ok && a.String() == w.String()
+	case *FEELTime:
+		a, ok := actual.(*FEELTime)
+		return ok && a.String() == w.String()
+	case *FEELDatetime:
+		a, ok := actual.(*FEELDatetime)
+		return ok && a.String() == w.String()
 	case []any:
 		a, ok := actual.([]any)
 		if !ok || len(a) != len(w) {
@@ -443,11 +477,26 @@ func runTCKSuite(t *testing.T, root string) {
 						intp.Push(scope)
 						ast, err := ParseString(d.LitExpr.Text)
 						if err != nil {
-							t.Fatalf("decision %q: parse error: %v", rn.Name, err)
+							if rn.ErrorResult {
+								continue
+							}
+							t.Errorf("decision %q: parse error: %v", rn.Name, err)
+							continue
 						}
 						got, err := ast.Eval(intp)
 						if err != nil {
-							t.Fatalf("decision %q: eval error: %v", rn.Name, err)
+							if rn.ErrorResult {
+								continue
+							}
+							t.Errorf("decision %q: eval error: %v", rn.Name, err)
+							continue
+						}
+						if rn.ErrorResult {
+							if _, isNull := got.(*NullValue); isNull {
+								continue
+							}
+							t.Errorf("decision %q: expected an error result, got %v", rn.Name, got)
+							continue
 						}
 
 						if !valuesEqual(t, rn.Expected, got) {

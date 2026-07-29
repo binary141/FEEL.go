@@ -166,7 +166,12 @@ func installContextFunctions(prelude *Prelude) {
 
 		contextsList, ok := contextsVal.([]any)
 		if !ok {
-			return Null, nil
+			// A single context behaves as an implicit singleton list.
+			if singleCtx, isCtx := contextsVal.(map[string]any); isCtx {
+				contextsList = []any{singleCtx}
+			} else {
+				return Null, nil
+			}
 		}
 
 		merged := make(map[string]any)
@@ -215,9 +220,6 @@ func installContextFunctions(prelude *Prelude) {
 			}
 			keyStr, ok := keyVal.(string)
 			if !ok {
-				return Null, nil
-			}
-			if keyStr == "" {
 				return Null, nil
 			}
 			value, hasValue := entryMap["value"]
