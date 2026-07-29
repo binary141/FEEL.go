@@ -732,6 +732,18 @@ func (binop Binop) indexAtOp(intp *Interpreter) (any, error) {
 }
 
 func (binop Binop) inOp(intp *Interpreter) (any, error) {
+	// FEEL names may contain spaces and even the "in" keyword itself (e.g.
+	// "days in weekend"). The parser can't disambiguate this from the "in"
+	// test operator without a symbol table, so when both sides parsed as
+	// bare names, prefer a bound name that joins them back together.
+	if leftVar, ok := binop.Left.(*Var); ok {
+		if rightVar, ok := binop.Right.(*Var); ok {
+			if v, ok := intp.Resolve(leftVar.Name + " in " + rightVar.Name); ok {
+				return v, nil
+			}
+		}
+	}
+
 	leftVal, err := binop.Left.Eval(intp)
 	if err != nil {
 		return nil, err
