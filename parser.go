@@ -612,14 +612,33 @@ func (p *Parser) singleElement() (Node, error) {
 	}
 }
 
+// specialNameKeywordPrefixes lists the first word of the standard FEEL
+// built-in names that legitimately embed a reserved word ("date and time",
+// "years and months duration"). Reserved words are only folded into a
+// multi-word variable name when the name parsed so far is one of these
+// prefixes; otherwise a keyword like "and"/"or" ends the name so it can be
+// parsed as the binary operator instead (e.g. `A and B`).
+var specialNameKeywordPrefixes = map[string]bool{
+	"date":  true, // date and time(...)
+	"years": true, // years and months duration(...)
+}
+
 func (p *Parser) parseVar() (Node, error) {
 	textRange := p.startTextRange()
-	name, err := p.parseName()
-	if err != nil {
-		return nil, err
+	names := make([]string, 0, 1)
+	for p.CurrentToken().Expect(TokenName, TokenKeyword) {
+		tok := p.CurrentToken()
+		if tok.Kind == TokenKeyword && len(names) > 0 && !specialNameKeywordPrefixes[names[0]] {
+			break
+		}
+		names = append(names, tok.Value)
+		p.scanner.Next()
+	}
+	if len(names) == 0 {
+		return nil, p.Unexpected(TokenName)
 	}
 	textRange.End = p.CurrentToken().Pos
-	return &Var{Name: name, textRange: textRange}, nil
+	return &Var{Name: strings.Join(names, " "), textRange: textRange}, nil
 }
 
 func (p *Parser) parseBool() (Node, error) {

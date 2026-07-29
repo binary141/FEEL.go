@@ -202,7 +202,14 @@ func installBuiltinFunctions(prelude *Prelude) {
 	}).Required("from").Optional("grouping separator", "decimal separator"))
 
 	// boolean functions
-	prelude.Bind("not", wrapTyped(func(v any) (bool, error) {
+	prelude.Bind("not", NewMacro(func(intp *Interpreter, args map[string]Node, varArgs []Node) (any, error) {
+		v, err := args["from"].Eval(intp)
+		if err != nil {
+			return nil, err
+		}
+		if _, isNull := v.(*NullValue); isNull {
+			return Null, nil
+		}
 		return !boolValue(v), nil
 	}).Required("from"))
 
