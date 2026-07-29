@@ -67,6 +67,12 @@
   }
   button:disabled { opacity: 0.6; cursor: default; }
   #result-label { margin-top: 1.5rem; }
+  #timing {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-left: 0.75rem;
+    font-weight: 400;
+  }
   pre#result {
     white-space: pre-wrap;
     word-break: break-word;
@@ -100,7 +106,7 @@
 
   <button id="run">Evaluate <kbd>Ctrl+Enter</kbd></button>
 
-  <label id="result-label" for="result">Result</label>
+  <label id="result-label" for="result">Result <span id="timing"></span></label>
   <pre id="result"></pre>
 </main>
 
@@ -109,11 +115,13 @@ const expressionEl = document.getElementById("expression");
 const contextEl = document.getElementById("context");
 const resultEl = document.getElementById("result");
 const runBtn = document.getElementById("run");
+const timingEl = document.getElementById("timing");
 
 async function evaluate() {
   runBtn.disabled = true;
   resultEl.classList.remove("error");
   resultEl.textContent = "Evaluating…";
+  timingEl.textContent = "";
 
   try {
     const res = await fetch("/api/eval", {
@@ -125,6 +133,9 @@ async function evaluate() {
       }),
     });
     const data = await res.json();
+    if (typeof data.elapsedMs === "number") {
+      timingEl.textContent = `(${data.elapsedMs.toFixed(2)} ms)`;
+    }
     if (data.error) {
       resultEl.classList.add("error");
       resultEl.textContent = data.error;

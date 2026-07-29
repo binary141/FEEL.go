@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"time"
 
 	feel "github.com/binary141/FEEL.go"
 )
@@ -20,8 +21,9 @@ type evalRequest struct {
 }
 
 type evalResponse struct {
-	Result any    `json:"result,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Result   any    `json:"result,omitempty"`
+	Error    string `json:"error,omitempty"`
+	ElapsedMs float64 `json:"elapsedMs"`
 }
 
 func evalHandler(w http.ResponseWriter, r *http.Request) {
@@ -38,13 +40,16 @@ func evalHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
+	start := time.Now()
 	result, err := feel.EvalString(req.Expression, req.Context)
+	elapsedMs := float64(time.Since(start)) / float64(time.Millisecond)
+
 	if err != nil {
-		json.NewEncoder(w).Encode(evalResponse{Error: err.Error()})
+		json.NewEncoder(w).Encode(evalResponse{Error: err.Error(), ElapsedMs: elapsedMs})
 		return
 	}
 
-	json.NewEncoder(w).Encode(evalResponse{Result: result})
+	json.NewEncoder(w).Encode(evalResponse{Result: result, ElapsedMs: elapsedMs})
 }
 
 func main() {
