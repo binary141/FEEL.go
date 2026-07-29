@@ -152,6 +152,22 @@ func TestFunDef(t *testing.T) {
 	assert.Equal([]string{")", ","}, une.expects)
 }
 
+// TestDotAttrBeforeKeyword guards against a regression where a dotted
+// attribute name greedily swallowed a following reserved keyword (e.g.
+// "settings.goldDiscount else ..." parsed the attribute as
+// "goldDiscount else"), which broke if/then/else branches that end in a
+// dotted property access.
+func TestDotAttrBeforeKeyword(t *testing.T) {
+	assert := assert.New(t)
+
+	input := `
+	if true then o.total * settings.goldDiscount else o.total * settings.standardDiscount
+	`
+	ast, err := ParseString(input)
+	assert.Nil(err)
+	assert.Equal(`(if true (* (. o total) (. settings goldDiscount)) (* (. o total) (. settings standardDiscount)))`, ast.Repr())
+}
+
 func TestMapValue(t *testing.T) {
 	assert := assert.New(t)
 
@@ -191,6 +207,7 @@ func FuzzParser(f *testing.F) {
 		`function(a, b) a + b * 2`,
 		`{ a: 1, b: @"2023-06-01", c: [1, 2, 3]}`,
 		`@"2023-06-07"`,
+		`if true then o.total * settings.goldDiscount else o.total * settings.standardDiscount`,
 	}
 	for _, s := range seeds {
 		f.Add(s)
