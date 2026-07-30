@@ -140,31 +140,42 @@ func installContextFunctions(prelude *Prelude) {
 	}).Required("context").Alias("context", "m"))
 
 	prelude.Bind("context put", NewNativeFunc(func(kwargs map[string]any) (any, error) {
-		type putByKey struct {
-			Context map[string]any `json:"context"`
-			Key     string         `json:"key"`
-			Value   any            `json:"value"`
+		ctx, isCtx := kwargs["context"].(map[string]any)
+		if !isCtx {
+			return Null, nil
 		}
 
-		type putByKeys struct {
-			Context map[string]any `json:"context"`
-			Keys    []string       `json:"key"`
-			Value   any            `json:"value"`
+		value, hasValue := kwargs["value"]
+		if !hasValue {
+			return Null, nil
 		}
 
-		argsByKey := putByKey{}
-
-		if err := decodeKWArgs(kwargs, &argsByKey); err != nil {
-			argsByKeys := putByKeys{}
-			if err := decodeKWArgs(kwargs, &argsByKeys); err != nil {
-				return Null, nil
+		var keys []string
+		switch k := kwargs["key"].(type) {
+		case string:
+			keys = []string{k}
+		case []any:
+			keys = make([]string, len(k))
+			for i, v := range k {
+				s, ok := v.(string)
+				if !ok {
+					return Null, nil
+				}
+				keys[i] = s
 			}
-			ctx, _ := contextPutKeys(argsByKeys.Context, argsByKeys.Keys, argsByKeys.Value)
-			return ctx, nil
-		} else {
-			ctx, _ := contextPutKeys(argsByKey.Context, []string{argsByKey.Key}, argsByKey.Value)
-			return ctx, nil
+		default:
+			return Null, nil
 		}
+
+		if len(keys) == 0 {
+			return Null, nil
+		}
+
+		newCtx, ok := contextPutKeys(contextCopy(ctx), keys, value)
+		if !ok {
+			return Null, nil
+		}
+		return newCtx, nil
 	}).Required("context", "key", "value"))
 
 	prelude.Bind("context merge", NewNativeFunc(func(kwargs map[string]any) (any, error) {
