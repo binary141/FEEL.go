@@ -724,8 +724,9 @@ func (node EveryExpr) Eval(intp *Interpreter) (any, error) {
 
 func (node FunDef) Eval(intp *Interpreter) (any, error) {
 	return &FunDef{
-		Args: node.Args,
-		Body: node.Body,
+		Args:    node.Args,
+		Body:    node.Body,
+		Closure: append([]Scope(nil), intp.ScopeStack...),
 	}, nil
 }
 
@@ -733,12 +734,18 @@ func (node FunDef) EvalCall(intp *Interpreter, args []any) (any, error) {
 	if len(args) != len(node.Args) {
 		return nil, errors.New("eval call argument size mismatch")
 	}
-	intp.PushEmpty()
-	defer intp.Pop()
-	for i, argName := range node.Args {
-		intp.Bind(argName, args[i])
+
+	callIntp := intp
+	if node.Closure != nil {
+		callIntp = &Interpreter{ScopeStack: append([]Scope(nil), node.Closure...)}
 	}
-	return node.Body.Eval(intp)
+
+	callIntp.PushEmpty()
+	defer callIntp.Pop()
+	for i, argName := range node.Args {
+		callIntp.Bind(argName, args[i])
+	}
+	return node.Body.Eval(callIntp)
 }
 
 func (node FunCall) Eval(intp *Interpreter) (any, error) {
@@ -929,8 +936,16 @@ func (node FunCall) EvalFunDef(intp *Interpreter, funDef *FunDef) (any, error) {
 		return nil, NewErrTooManyArguments()
 	}
 	//var args []any
-	intp.PushEmpty()
-	defer intp.Pop()
+	// Arguments are evaluated against the caller's ambient scope (intp), but
+	// the call is bound and the body evaluated against the function's own
+	// lexical closure, if it captured one - otherwise a returned function
+	// would lose access to its defining scope once back out in the caller.
+	callIntp := intp
+	if funDef.Closure != nil {
+		callIntp = &Interpreter{ScopeStack: append([]Scope(nil), funDef.Closure...)}
+	}
+	callIntp.PushEmpty()
+	defer callIntp.Pop()
 
 	if node.keywordArgs {
 		kwArgMap, err := node.evalArgsToMap(intp)
@@ -941,10 +956,10 @@ func (node FunCall) EvalFunDef(intp *Interpreter, funDef *FunDef) (any, error) {
 		for _, argName := range funDef.Args {
 			if v, ok := kwArgMap[argName]; ok {
 				//argVals = append(argVals, v)
-				intp.Bind(argName, v)
+				callIntp.Bind(argName, v)
 			} else {
 				//return nil, NewEvalError(-5001, "no keyword argument", fmt.Sprintf("no keyword argument %s", argName))
-				intp.Bind(argName, Null)
+				callIntp.Bind(argName, Null)
 			}
 		}
 	} else {
@@ -953,10 +968,10 @@ func (node FunCall) EvalFunDef(intp *Interpreter, funDef *FunDef) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			intp.Bind(funDef.Args[i], a)
+			callIntp.Bind(funDef.Args[i], a)
 		}
 	}
-	ret, err := funDef.Body.Eval(intp)
+	ret, err := funDef.Body.Eval(callIntp)
 	return ret, err
 }
 

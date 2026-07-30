@@ -1183,6 +1183,25 @@ func (p *Parser) parseFunDef() (Node, error) {
 
 		args = append(args, argName)
 
+		// Optional ": typeRef" annotation (e.g. "function(a: number, b: list<string>) ...").
+		// The type isn't needed for evaluation, so just skip past it.
+		if p.CurrentToken().Expect(":") {
+			p.scanner.Next()
+			depth := 0
+			for {
+				if p.CurrentToken().Expect("<") {
+					depth++
+				} else if p.CurrentToken().Expect(">") {
+					depth--
+				} else if depth == 0 && (p.CurrentToken().Expect(",") || p.CurrentToken().Expect(")")) {
+					break
+				} else if p.CurrentToken().Kind == TokenEOF {
+					return nil, p.Unexpected(")", ",")
+				}
+				p.scanner.Next()
+			}
+		}
+
 		if p.CurrentToken().Expect(",") {
 			p.scanner.Next()
 		} else if !p.CurrentToken().Expect(")") {

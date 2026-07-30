@@ -96,6 +96,13 @@ type FunDef struct {
 	Args []string
 	Body Node
 
+	// Closure is the lexical scope chain captured when this function value
+	// was created (see FunDef.Eval), so calling it later - e.g. after it has
+	// been returned out of its defining function - still sees the variables
+	// visible at its definition site rather than whatever happens to be on
+	// the caller's scope stack.
+	Closure []Scope
+
 	textRange TextRange
 }
 

@@ -158,17 +158,22 @@ func ParseTime(temporalStr string) (*FEELTime, error) {
 func (st FEELTime) GetAttr(name string) (any, bool) {
 	switch name {
 	case "hour":
-		return st.t.Hour(), true
+		return N(st.t.Hour()), true
 	case "minute":
-		return st.t.Minute(), true
+		return N(st.t.Minute()), true
 	case "second":
-		return st.t.Second(), true
+		return N(st.t.Second()), true
 	case "timezone":
-		zoneName, _ := st.t.Zone()
-		return zoneName, true
-	case "timezone offset":
-		_, offset := st.t.Zone()
-		return offset, true
+		if st.zoneKind != zoneNamed {
+			return Null, true
+		}
+		return st.zoneName, true
+	case "time offset":
+		if st.zoneKind == zoneNone {
+			return Null, true
+		}
+		_, offsetSecs := st.t.Zone()
+		return NewFEELDuration(time.Duration(offsetSecs) * time.Second), true
 	}
 	return nil, false
 }
@@ -209,13 +214,25 @@ func (date FEELDate) Time() time.Time {
 func (date FEELDate) GetAttr(name string) (any, bool) {
 	switch name {
 	case "year":
-		return date.t.Year(), true
+		return N(date.t.Year()), true
 	case "month":
-		return date.t.Month(), true
+		return N(int(date.t.Month())), true
 	case "day":
-		return date.t.Day(), true
+		return N(date.t.Day()), true
+	case "weekday":
+		return N(isoWeekday(date.t)), true
 	}
 	return nil, false
+}
+
+// isoWeekday converts Go's Sunday=0..Saturday=6 weekday into FEEL's ISO 8601
+// Monday=1..Sunday=7 convention.
+func isoWeekday(t time.Time) int {
+	wd := int(t.Weekday())
+	if wd == 0 {
+		wd = 7
+	}
+	return wd
 }
 
 func (date FEELDate) String() string {
@@ -317,23 +334,30 @@ func (sdt FEELDatetime) Compare(other FEELDatetime) int {
 func (sdt FEELDatetime) GetAttr(name string) (any, bool) {
 	switch name {
 	case "year":
-		return sdt.t.Year(), true
+		return N(sdt.t.Year()), true
 	case "month":
-		return sdt.t.Month(), true
+		return N(int(sdt.t.Month())), true
 	case "day":
-		return sdt.t.Day(), true
+		return N(sdt.t.Day()), true
+	case "weekday":
+		return N(isoWeekday(sdt.t)), true
 	case "hour":
-		return sdt.t.Hour(), true
+		return N(sdt.t.Hour()), true
 	case "minute":
-		return sdt.t.Minute(), true
+		return N(sdt.t.Minute()), true
 	case "second":
-		return sdt.t.Second(), true
+		return N(sdt.t.Second()), true
 	case "timezone":
-		zoneName, _ := sdt.t.Zone()
-		return zoneName, true
-	case "timezone offset":
-		_, offset := sdt.t.Zone()
-		return offset, true
+		if sdt.zoneKind != zoneNamed {
+			return Null, true
+		}
+		return sdt.zoneName, true
+	case "time offset":
+		if sdt.zoneKind == zoneNone {
+			return Null, true
+		}
+		_, offsetSecs := sdt.t.Zone()
+		return NewFEELDuration(time.Duration(offsetSecs) * time.Second), true
 	}
 	return nil, false
 }
@@ -568,6 +592,10 @@ type FEELDuration struct {
 func NewFEELDuration(dur time.Duration) *FEELDuration {
 	d := &FEELDuration{}
 	ndur := int(dur)
+	if ndur < 0 {
+		d.Neg = true
+		ndur = -ndur
+	}
 	nhours := ndur / int(time.Hour)
 	remain := ndur - nhours*int(time.Hour)
 	nmins := remain / int(time.Minute)
@@ -583,11 +611,19 @@ func NewFEELDuration(dur time.Duration) *FEELDuration {
 }
 
 func (dur FEELDuration) GetAttr(name string) (any, bool) {
+	// years/months only exist on a year-month duration; days/hours/minutes/
+	// seconds only exist on a day-time duration - the other kind's fields
+	// aren't just zero, they're not a property of that value at all.
+	if dur.IsYM {
+		switch name {
+		case "years":
+			return dur.Years, true
+		case "months":
+			return dur.Months, true
+		}
+		return nil, false
+	}
 	switch name {
-	case "years":
-		return dur.Years, true
-	case "months":
-		return dur.Months, true
 	case "days":
 		return dur.Days, true
 	case "hours":
@@ -792,9 +828,6 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 				return nil, err
 			}
 			dur.Hours = int(v)
-			// normalize hours >= 24 into days
-			dur.Days += dur.Hours / 24
-			dur.Hours = dur.Hours % 24
 		}
 		if submatches[7] != "" {
 			v, err := strconv.ParseInt(submatches[8], 10, 64)
@@ -815,6 +848,17 @@ func ParseDuration(temporalStr string) (*FEELDuration, error) {
 			}
 			dur.SecondsFrac = frac // ".1234" or ""
 		}
+
+		// Carry seconds -> minutes -> hours -> days, since each field is
+		// parsed independently and the source text isn't required to keep
+		// them within their usual bounds (e.g. "PT61M" or "PT3600S").
+		dur.Minutes += dur.Seconds / 60
+		dur.Seconds = dur.Seconds % 60
+		dur.Hours += dur.Minutes / 60
+		dur.Minutes = dur.Minutes % 60
+		dur.Days += dur.Hours / 24
+		dur.Hours = dur.Hours % 24
+
 		return dur, nil
 	}
 
