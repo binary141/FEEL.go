@@ -68,6 +68,10 @@ func contextPutKeys(ctx map[string]any, keys []string, value any) (map[string]an
 		} else {
 			if v, ok := ctx[key]; ok {
 				if subctx, ok := v.(map[string]any); ok {
+					// copy the nested context so we don't mutate the
+					// original's shared submap
+					subctx = contextCopy(subctx)
+					ctx[key] = subctx
 					ctx = subctx
 				} else {
 					return rootCtx, false
