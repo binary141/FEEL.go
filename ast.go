@@ -102,7 +102,12 @@ func (fc FunCall) Repr() string {
 // function definition
 type FunDef struct {
 	Args []string
-	Body Node
+	// ArgTypes holds each parameter's optional ": typeRef" annotation (e.g.
+	// "function(a: number, b) ..." -> ["number", ""]), parallel to Args; ""
+	// means unannotated. Only checked against FEEL's primitive type names -
+	// see primitiveCoerce.
+	ArgTypes []string
+	Body     Node
 
 	// Closure is the lexical scope chain captured when this function value
 	// was created (see FunDef.Eval), so calling it later - e.g. after it has

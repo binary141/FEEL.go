@@ -565,6 +565,24 @@ func (p *Parser) parseFuncallOrIndexOrDot() (Node, error) {
 // 	return p.parseFuncallRest(&Var{Name: funcName, textRange: })
 // // }
 
+// dottedName reconstructs a qualified kwarg name (e.g. "Person.Gender") from
+// a parsed Var or chain of DotOp nodes, so named function-call arguments can
+// use dotted parameter names as some DMN business knowledge models declare.
+func dottedName(n Node) (string, bool) {
+	switch v := n.(type) {
+	case *Var:
+		return v.Name, true
+	case *DotOp:
+		left, ok := dottedName(v.Left)
+		if !ok {
+			return "", false
+		}
+		return left + "." + v.Attr, true
+	default:
+		return "", false
+	}
+}
+
 func (p *Parser) parseFunccallArg() (funcallArg, error) {
 	arg, err := p.expression()
 	if err != nil {
@@ -572,7 +590,7 @@ func (p *Parser) parseFunccallArg() (funcallArg, error) {
 	}
 
 	if p.CurrentToken().Expect(":") { // kwargs
-		if varArg, ok := arg.(*Var); ok {
+		if name, ok := dottedName(arg); ok {
 			if err := p.scanner.Next(); err != nil {
 				return funcallArg{}, err
 			}
@@ -580,7 +598,7 @@ func (p *Parser) parseFunccallArg() (funcallArg, error) {
 			if err != nil {
 				return funcallArg{}, err
 			}
-			return funcallArg{argName: varArg.Name, arg: argValue}, nil
+			return funcallArg{argName: name, arg: argValue}, nil
 		} else {
 			return funcallArg{}, p.Unexpected("var")
 		}
@@ -747,9 +765,16 @@ var reservedKeywords = []string{
 func (p *Parser) parseVar() (Node, error) {
 	textRange := p.startTextRange()
 	names := make([]string, 0, 1)
-	for p.CurrentToken().Expect(TokenName, TokenKeyword) {
+	for p.CurrentToken().Expect(TokenName, TokenKeyword, TokenNumber) {
 		tok := p.CurrentToken()
 		if tok.Kind == TokenKeyword && len(names) > 0 && !specialNameKeywordPrefixes[names[0]] {
+			break
+		}
+		// A number can only continue a multi-word business name (e.g.
+		// "Extra days case 1") once at least one name word has been seen -
+		// it can never start a name, and two primaries can't otherwise
+		// appear back to back with nothing but whitespace between them.
+		if tok.Kind == TokenNumber && len(names) == 0 {
 			break
 		}
 		names = append(names, tok.Value)
@@ -1311,6 +1336,7 @@ func (p *Parser) parseFunDef() (Node, error) {
 
 	// parse var list
 	var args []string
+	var argTypes []string
 	for !p.CurrentToken().Expect(")") {
 		argName, err := p.parseName()
 		if err != nil {
@@ -1320,7 +1346,10 @@ func (p *Parser) parseFunDef() (Node, error) {
 		args = append(args, argName)
 
 		// Optional ": typeRef" annotation (e.g. "function(a: number, b: list<string>) ...").
-		// The type isn't needed for evaluation, so just skip past it.
+		// Only simple (non-generic) type names are captured for runtime
+		// enforcement - see primitiveCoerce; "list<...>"/other generic forms
+		// are parsed past but not checked.
+		argType := ""
 		if p.CurrentToken().Expect(":") {
 			if err := p.scanner.Next(); err != nil {
 				return nil, err
@@ -1336,11 +1365,20 @@ func (p *Parser) parseFunDef() (Node, error) {
 				} else if p.CurrentToken().Kind == TokenEOF {
 					return nil, p.Unexpected(")", ",")
 				}
+				if depth == 0 && p.CurrentToken().Kind == TokenName {
+					if argType != "" {
+						argType += " "
+					}
+					argType += p.CurrentToken().Value
+				} else {
+					argType = ""
+				}
 				if err := p.scanner.Next(); err != nil {
 					return nil, err
 				}
 			}
 		}
+		argTypes = append(argTypes, argType)
 
 		if p.CurrentToken().Expect(",") {
 			if err := p.scanner.Next(); err != nil {
@@ -1367,6 +1405,7 @@ func (p *Parser) parseFunDef() (Node, error) {
 	rng.End = p.CurrentToken().Pos
 	return &FunDef{
 		Args:      args,
+		ArgTypes:  argTypes,
 		Body:      exp,
 		textRange: rng,
 	}, nil

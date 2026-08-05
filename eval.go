@@ -502,6 +502,44 @@ func (utv UnaryTestValue) String() string {
 	return fmt.Sprintf("(%s%v)", utv.Op, utv.Value)
 }
 
+// GetAttr exposes a parenthesised unary test value (e.g. "(<10)") as an
+// open-ended range's start/end properties, per the DMN FEEL spec's range
+// property semantics.
+func (utv UnaryTestValue) GetAttr(name string) (any, bool) {
+	switch utv.Op {
+	case "<", "<=":
+		switch name {
+		case "start":
+			return Null, true
+		case "end":
+			return utv.Value, true
+		case "start included":
+			return false, true
+		case "end included":
+			return utv.Op == "<=", true
+		}
+	case ">", ">=":
+		switch name {
+		case "start":
+			return utv.Value, true
+		case "end":
+			return Null, true
+		case "start included":
+			return utv.Op == ">=", true
+		case "end included":
+			return false, true
+		}
+	case "=":
+		switch name {
+		case "start", "end":
+			return utv.Value, true
+		case "start included", "end included":
+			return true, true
+		}
+	}
+	return nil, false
+}
+
 func (node UnaryTestValueNode) Eval(intp *Interpreter) (any, error) {
 	val, err := node.Value.Eval(intp)
 	if err != nil {
@@ -696,11 +734,12 @@ func (node SomeExpr) Eval(intp *Interpreter) (any, error) {
 			return nil, err
 		}
 		if boolValue(res) {
-			return val, nil
+			intp.Pop()
+			return true, nil
 		}
 	}
 	intp.Pop()
-	return nil, nil
+	return false, nil
 }
 
 func (node EveryExpr) Eval(intp *Interpreter) (any, error) {
@@ -714,7 +753,6 @@ func (node EveryExpr) Eval(intp *Interpreter) (any, error) {
 		return nil, err
 	}
 	intp.PushEmpty()
-	chooses := make([]any, 0)
 	for _, val := range aList {
 		intp.Bind(node.Varname, val)
 
@@ -724,20 +762,86 @@ func (node EveryExpr) Eval(intp *Interpreter) (any, error) {
 			return nil, err
 		}
 
-		if boolValue(res) {
-			chooses = append(chooses, val)
+		if !boolValue(res) {
+			intp.Pop()
+			return false, nil
 		}
 	}
 	intp.Pop()
-	return chooses, nil
+	return true, nil
 }
 
 func (node FunDef) Eval(intp *Interpreter) (any, error) {
 	return &FunDef{
-		Args:    node.Args,
-		Body:    node.Body,
-		Closure: append([]Scope(nil), intp.ScopeStack...),
+		Args:     node.Args,
+		ArgTypes: node.ArgTypes,
+		Body:     node.Body,
+		Closure:  append([]Scope(nil), intp.ScopeStack...),
 	}, nil
+}
+
+// argType returns node.ArgTypes[i], or "" if ArgTypes is shorter than Args
+// (e.g. a FunDef built by hand rather than parsed).
+func (node FunDef) argType(i int) string {
+	if i < len(node.ArgTypes) {
+		return node.ArgTypes[i]
+	}
+	return ""
+}
+
+// primitiveCoerce checks value against one of FEEL's primitive type names
+// (as captured from a function literal's ": type" parameter annotation),
+// returning Null if it doesn't conform. Values are expected to already be
+// FEEL-native (as produced by evaluating a FEEL expression) rather than raw
+// Go/JSON types. An unrecognized type name is treated as unchecked (the
+// original value is returned as-is) rather than rejected, since this only
+// covers the type names DMN business logic commonly annotates parameters
+// with - not the full FEEL type-name grammar.
+func primitiveCoerce(value any, typeName string) any {
+	if typeName == "" {
+		return value
+	}
+	if _, isNull := value.(*NullValue); isNull {
+		return value
+	}
+	switch typeName {
+	case "number":
+		if _, ok := value.(*Number); ok {
+			return value
+		}
+		return Null
+	case "string":
+		if _, ok := value.(string); ok {
+			return value
+		}
+		return Null
+	case "boolean":
+		if _, ok := value.(bool); ok {
+			return value
+		}
+		return Null
+	case "date":
+		if _, ok := value.(*FEELDate); ok {
+			return value
+		}
+		return Null
+	case "time":
+		if _, ok := value.(*FEELTime); ok {
+			return value
+		}
+		return Null
+	case "dateTime":
+		if _, ok := value.(*FEELDatetime); ok {
+			return value
+		}
+		return Null
+	case "dayTimeDuration", "yearMonthDuration", "duration":
+		if _, ok := value.(*FEELDuration); ok {
+			return value
+		}
+		return Null
+	}
+	return value
 }
 
 func (node FunDef) EvalCall(intp *Interpreter, args []any) (any, error) {
@@ -753,7 +857,7 @@ func (node FunDef) EvalCall(intp *Interpreter, args []any) (any, error) {
 	callIntp.PushEmpty()
 	defer callIntp.Pop()
 	for i, argName := range node.Args {
-		callIntp.Bind(argName, args[i])
+		callIntp.Bind(argName, primitiveCoerce(args[i], node.argType(i)))
 	}
 	return node.Body.Eval(callIntp)
 }
@@ -963,10 +1067,10 @@ func (node FunCall) EvalFunDef(intp *Interpreter, funDef *FunDef) (any, error) {
 			return nil, err
 		}
 
-		for _, argName := range funDef.Args {
+		for i, argName := range funDef.Args {
 			if v, ok := kwArgMap[argName]; ok {
 				//argVals = append(argVals, v)
-				callIntp.Bind(argName, v)
+				callIntp.Bind(argName, primitiveCoerce(v, funDef.argType(i)))
 			} else {
 				//return nil, NewEvalError(-5001, "no keyword argument", fmt.Sprintf("no keyword argument %s", argName))
 				callIntp.Bind(argName, Null)
@@ -978,7 +1082,7 @@ func (node FunCall) EvalFunDef(intp *Interpreter, funDef *FunDef) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			callIntp.Bind(funDef.Args[i], a)
+			callIntp.Bind(funDef.Args[i], primitiveCoerce(a, funDef.argType(i)))
 		}
 	}
 	ret, err := funDef.Body.Eval(callIntp)
