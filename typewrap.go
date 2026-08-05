@@ -1,16 +1,12 @@
 package feel
 
 import (
+	"errors"
 	"fmt"
-	"github.com/mitchellh/mapstructure"
-	"github.com/pkg/errors"
 	"reflect"
-)
 
-func typeIsStruct(tp reflect.Type) bool {
-	return (tp.Kind() == reflect.Struct ||
-		(tp.Kind() == reflect.Pointer && typeIsStruct(tp.Elem())))
-}
+	"github.com/mitchellh/mapstructure"
+)
 
 func interfaceToValue(a any, outputType reflect.Type) (reflect.Value, error) {
 	if outputType.Kind() == reflect.Interface {
@@ -132,11 +128,11 @@ func wrapTyped(tfunc any) *NativeFun {
 			argType := funcType.In(i)
 			argName, hasArg := nativeFun.ArgNameAt(i)
 			if !hasArg {
-				return nil, errors.New(fmt.Sprintf("arg not found at %d", i))
+				return nil, fmt.Errorf("arg not found at %d", i)
 			}
 			param, ok := args[argName]
 			if !ok {
-				return nil, errors.New(fmt.Sprintf("arg not found %s", argName))
+				return nil, fmt.Errorf("arg not found %s", argName)
 			}
 			j++
 

@@ -240,12 +240,6 @@ func (prelude *Prelude) Resolve(name string) (any, bool) {
 	return v, ok
 }
 
-// buildin native funcs
-func nativeBind(intp *Interpreter, varname string, value any) (any, error) {
-	intp.Bind(varname, value)
-	return nil, nil
-}
-
 // callableArity returns the number of positional parameters v (a *FunDef or
 // *NativeFun) accepts, for builtins (sort, list replace, ...) that take a
 // function value as ordinary data and need to validate its arity before

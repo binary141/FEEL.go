@@ -122,11 +122,11 @@ func (rv RangeValue) Includes(other RangeValue) (bool, error) {
 		return false, nil
 	}
 
-	if !(cmpStart < 0 || !rv.StartOpen || other.StartOpen) {
+	if cmpStart >= 0 && rv.StartOpen && !other.StartOpen {
 		return false, nil
 	}
 
-	if !(cmpEnd > 0 || !rv.EndOpen || other.EndOpen) {
+	if cmpEnd <= 0 && rv.EndOpen && !other.EndOpen {
 		return false, nil
 	}
 	return true, nil

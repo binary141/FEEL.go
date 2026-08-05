@@ -45,11 +45,15 @@ func evalHandler(w http.ResponseWriter, r *http.Request) {
 	elapsedMs := float64(time.Since(start)) / float64(time.Millisecond)
 
 	if err != nil {
-		json.NewEncoder(w).Encode(evalResponse{Error: err.Error(), ElapsedMs: elapsedMs})
+		if err := json.NewEncoder(w).Encode(evalResponse{Error: err.Error(), ElapsedMs: elapsedMs}); err != nil {
+			log.Println(err)
+		}
 		return
 	}
 
-	json.NewEncoder(w).Encode(evalResponse{Result: result, ElapsedMs: elapsedMs})
+	if err := json.NewEncoder(w).Encode(evalResponse{Result: result, ElapsedMs: elapsedMs}); err != nil {
+		log.Println(err)
+	}
 }
 
 func main() {

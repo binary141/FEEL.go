@@ -233,7 +233,7 @@ func (n tckNode) toValue() (any, error) {
 	case len(n.Component) > 0:
 		m := make(map[string]any, len(n.Component))
 		for _, c := range n.Component {
-			val, err := c.tckNode.toValue()
+			val, err := c.toValue()
 			if err != nil {
 				return nil, fmt.Errorf("component %q: %w", c.Name, err)
 			}

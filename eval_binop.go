@@ -269,11 +269,12 @@ func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op
 			}
 		}
 	case *FEELDatetime:
-		if op == "+" {
+		switch op {
+		case "+":
 			if rightDur, ok := rightVal.(*FEELDuration); ok {
 				return v.Add(rightDur), nil
 			}
-		} else if op == "-" {
+		case "-":
 			if rightDur, ok := rightVal.(*FEELDuration); ok {
 				return v.Add(rightDur.Negative()), nil
 			} else if rightDT, ok := rightVal.(*FEELDatetime); ok {
@@ -289,11 +290,12 @@ func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op
 			}
 		}
 	case *FEELDate:
-		if op == "+" {
+		switch op {
+		case "+":
 			if rightDur, ok := rightVal.(*FEELDuration); ok {
 				return v.Add(rightDur), nil
 			}
-		} else if op == "-" {
+		case "-":
 			if rightDur, ok := rightVal.(*FEELDuration); ok {
 				return v.Add(rightDur.Negative()), nil
 			} else if rightDate, ok := rightVal.(*FEELDate); ok {
@@ -306,14 +308,15 @@ func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op
 			}
 		}
 	case *FEELTime:
-		if op == "+" {
+		switch op {
+		case "+":
 			if rightDur, ok := rightVal.(*FEELDuration); ok {
 				if rightDur.IsYearMonth() {
 					return Null, nil
 				}
 				return v.Add(rightDur), nil
 			}
-		} else if op == "-" {
+		case "-":
 			if rightDur, ok := rightVal.(*FEELDuration); ok {
 				if rightDur.IsYearMonth() {
 					return Null, nil
@@ -325,13 +328,14 @@ func (binop Binop) typedOp(intp *Interpreter, es evalStrings, en evalNumbers, op
 		}
 	case *FEELDuration:
 		if rightDur, ok := rightVal.(*FEELDuration); ok {
-			if op == "+" {
+			switch op {
+			case "+":
 				result, err := v.Add(rightDur)
 				if err != nil {
 					return Null, nil
 				}
 				return result, nil
-			} else if op == "-" {
+			case "-":
 				result, err := v.Sub(rightDur)
 				if err != nil {
 					return Null, nil

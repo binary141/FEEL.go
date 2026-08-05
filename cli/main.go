@@ -18,7 +18,10 @@ func main() {
 	pVarsStr := cliFlags.String("vars", "", "context vars")
 	pDumpAST := cliFlags.Bool("ast", false, "dump ast tree only")
 
-	cliFlags.Parse(os.Args[1:])
+	if err := cliFlags.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	input := *pCmdStr
 	if input == "" {

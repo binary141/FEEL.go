@@ -294,8 +294,8 @@ func feelNumberString(n *Number) string {
 
 func feelContextKeyNeedsQuotes(k string) bool {
 	for _, r := range k {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
-			r == '_' || r == ' ' || r == '-' || r == '.') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') &&
+			r != '_' && r != ' ' && r != '-' && r != '.' {
 			return true
 		}
 	}
