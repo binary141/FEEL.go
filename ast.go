@@ -10,6 +10,14 @@ type Scope map[string]any
 
 type Interpreter struct {
 	ScopeStack []Scope
+
+	// TypeResolver, when set, resolves a custom type name (e.g. a DMN
+	// itemDefinition alias like "tEligibility") used on the right of
+	// "instance of" into the structural type descriptor "instance of"
+	// itself understands (a builtin primitive name, or a "list<...>" /
+	// "context<...>" descriptor). Names it doesn't recognize should return
+	// ok=false so the type name is checked as-is.
+	TypeResolver func(name string) (string, bool)
 }
 
 type Node interface {

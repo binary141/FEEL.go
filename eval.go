@@ -272,7 +272,7 @@ func (node InstanceOfNode) Eval(intp *Interpreter) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return matchesInstanceOfType(val, node.TypeName), nil
+	return matchesInstanceOfType(intp, val, node.TypeName), nil
 }
 
 // splitTopLevel splits s on sep, ignoring occurrences of sep nested inside
@@ -303,7 +303,7 @@ func splitTopLevel(s string, sep byte) []string {
 // descriptor (the contents of a context<...> instance-of type). Extra
 // fields present on val but not listed in the type are allowed; every
 // listed field must be present on val with a matching type.
-func matchesContextType(val any, inner string) bool {
+func matchesContextType(intp *Interpreter, val any, inner string) bool {
 	m, ok := val.(map[string]any)
 	if !ok {
 		return false
@@ -328,7 +328,7 @@ func matchesContextType(val any, inner string) bool {
 		if _, isNull := fv.(*NullValue); isNull {
 			continue
 		}
-		if !matchesInstanceOfType(fv, fieldType) {
+		if !matchesInstanceOfType(intp, fv, fieldType) {
 			return false
 		}
 	}
@@ -336,8 +336,18 @@ func matchesContextType(val any, inner string) bool {
 }
 
 // matchesInstanceOfType implements the "instance of" operator against a
-// type descriptor string as produced by parseInstanceOfTypeExpr.
-func matchesInstanceOfType(val any, expected string) bool {
+// type descriptor string as produced by parseInstanceOfTypeExpr. intp may
+// be nil (e.g. from direct unit tests); its TypeResolver, when present,
+// resolves custom type names (DMN itemDefinition aliases) that this
+// function doesn't itself recognize.
+func matchesInstanceOfType(intp *Interpreter, val any, expected string) bool {
+	if expected != "Any" {
+		if intp != nil && intp.TypeResolver != nil {
+			if resolved, ok := intp.TypeResolver(expected); ok && resolved != expected {
+				return matchesInstanceOfType(intp, val, resolved)
+			}
+		}
+	}
 	if expected == "Any" {
 		_, isNull := val.(*NullValue)
 		return !isNull
@@ -363,14 +373,14 @@ func matchesInstanceOfType(val any, expected string) bool {
 		}
 		inner := expected[len("list<") : len(expected)-1]
 		for _, item := range lst {
-			if !matchesInstanceOfType(item, inner) {
+			if !matchesInstanceOfType(intp, item, inner) {
 				return false
 			}
 		}
 		return true
 	}
 	if strings.HasPrefix(expected, "context<") && strings.HasSuffix(expected, ">") {
-		return matchesContextType(val, expected[len("context<"):len(expected)-1])
+		return matchesContextType(intp, val, expected[len("context<"):len(expected)-1])
 	}
 	// function<...>->...: FEEL.go has no structural function-signature
 	// checking, so only the outer kind is checked.

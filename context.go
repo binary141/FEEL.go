@@ -143,44 +143,110 @@ func installContextFunctions(prelude *Prelude) {
 		return entries, nil
 	}).Required("context").Alias("context", "m"))
 
-	prelude.Bind("context put", NewNativeFunc(func(kwargs map[string]any) (any, error) {
-		ctx, isCtx := kwargs["context"].(map[string]any)
-		if !isCtx {
-			return Null, nil
-		}
+	prelude.Bind("context put", NewRawFunc(func(intp *Interpreter, node FunCall) (any, error) {
+		eval := func(n Node) (any, error) { return n.Eval(intp) }
 
-		value, hasValue := kwargs["value"]
-		if !hasValue {
-			return Null, nil
-		}
-
-		var keys []string
-		switch k := kwargs["key"].(type) {
-		case string:
-			keys = []string{k}
-		case []any:
-			keys = make([]string, len(k))
-			for i, v := range k {
-				s, ok := v.(string)
-				if !ok {
-					return Null, nil
+		// keyToKeys accepts either a single key (a bare string, from the
+		// "key" parameter or a positional call) or a path of keys (a list,
+		// from the "keys" parameter or a positional call) - only the named
+		// "key" form is restricted to a single string, matching the spec's
+		// two-overload signature.
+		keyToKeys := func(v any, allowList bool) ([]string, bool) {
+			switch k := v.(type) {
+			case string:
+				return []string{k}, true
+			case []any:
+				if !allowList {
+					return nil, false
 				}
-				keys[i] = s
+				keys := make([]string, len(k))
+				for i, item := range k {
+					s, ok := item.(string)
+					if !ok {
+						return nil, false
+					}
+					keys[i] = s
+				}
+				return keys, true
+			default:
+				return nil, false
 			}
-		default:
-			return Null, nil
 		}
 
-		if len(keys) == 0 {
-			return Null, nil
+		put := func(ctxVal, keyVal, valueVal any, allowList bool) (any, error) {
+			ctx, isCtx := ctxVal.(map[string]any)
+			if !isCtx {
+				return Null, nil
+			}
+			keys, ok := keyToKeys(keyVal, allowList)
+			if !ok || len(keys) == 0 {
+				return Null, nil
+			}
+			newCtx, ok := contextPutKeys(contextCopy(ctx), keys, valueVal)
+			if !ok {
+				return Null, nil
+			}
+			return newCtx, nil
 		}
 
-		newCtx, ok := contextPutKeys(contextCopy(ctx), keys, value)
-		if !ok {
+		if node.keywordArgs {
+			kwArgMap := make(map[string]Node)
+			for _, a := range node.Args {
+				kwArgMap[a.argName] = a.arg
+			}
+			ctxNode, ok := kwArgMap["context"]
+			if !ok {
+				return Null, nil
+			}
+			valueNode, ok := kwArgMap["value"]
+			if !ok {
+				return Null, nil
+			}
+			keyNode, hasKey := kwArgMap["key"]
+			keysNode, hasKeys := kwArgMap["keys"]
+			if hasKey == hasKeys {
+				// exactly one of "key" (single) / "keys" (path) must be given
+				return Null, nil
+			}
+			ctxVal, err := eval(ctxNode)
+			if err != nil {
+				return nil, err
+			}
+			valueVal, err := eval(valueNode)
+			if err != nil {
+				return nil, err
+			}
+			if hasKeys {
+				keysVal, err := eval(keysNode)
+				if err != nil {
+					return nil, err
+				}
+				return put(ctxVal, keysVal, valueVal, true)
+			}
+			keyVal, err := eval(keyNode)
+			if err != nil {
+				return nil, err
+			}
+			return put(ctxVal, keyVal, valueVal, false)
+		}
+
+		if len(node.Args) != 3 {
 			return Null, nil
 		}
-		return newCtx, nil
-	}).Required("context", "key", "value"))
+		ctxVal, err := eval(node.Args[0].arg)
+		if err != nil {
+			return nil, err
+		}
+		keyVal, err := eval(node.Args[1].arg)
+		if err != nil {
+			return nil, err
+		}
+		valueVal, err := eval(node.Args[2].arg)
+		if err != nil {
+			return nil, err
+		}
+		return put(ctxVal, keyVal, valueVal, true)
+	}))
 
 	prelude.Bind("context merge", NewNativeFunc(func(kwargs map[string]any) (any, error) {
 		_, hasExtra := kwargs["__extra"]
