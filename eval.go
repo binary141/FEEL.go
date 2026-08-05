@@ -626,8 +626,12 @@ func (node DotOp) Eval(intp *Interpreter) (any, error) {
 
 		}
 	} else {
-		return nil, NewErrTypeMismatch("map")
-		//return Null, nil
+		// Per the DMN FEEL spec's path-expression semantics, a.b is null
+		// whenever a isn't a context/structural value (not just when a is
+		// null) - it's not an error condition, so evaluation of whatever
+		// larger expression contains it can proceed normally instead of
+		// aborting outright.
+		return Null, nil
 	}
 }
 
