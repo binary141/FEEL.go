@@ -728,6 +728,17 @@ func NewYearMonthDuration(totalMonths int64) *FEELDuration {
 	return dur
 }
 
+// secondsFracIsZero reports whether a parsed fractional-seconds suffix (e.g.
+// "", ".000", ".") represents no fractional value at all.
+func secondsFracIsZero(frac string) bool {
+	for _, c := range frac {
+		if c != '.' && c != '0' {
+			return false
+		}
+	}
+	return true
+}
+
 func (dur FEELDuration) String() string {
 	neg := ""
 	if dur.Neg {
@@ -735,7 +746,7 @@ func (dur FEELDuration) String() string {
 	}
 	if dur.IsYM {
 		if dur.Years == 0 && dur.Months == 0 {
-			return neg + "P0Y"
+			return neg + "P0M"
 		}
 		s := ""
 		if dur.Years != 0 {
@@ -747,8 +758,8 @@ func (dur FEELDuration) String() string {
 		return neg + "P" + s
 	}
 	// day-time duration
-	if dur.Days == 0 && dur.Hours == 0 && dur.Minutes == 0 && dur.Seconds == 0 && dur.SecondsFrac == "" {
-		return neg + "P0D"
+	if dur.Days == 0 && dur.Hours == 0 && dur.Minutes == 0 && dur.Seconds == 0 && secondsFracIsZero(dur.SecondsFrac) {
+		return neg + "PT0S"
 	}
 	sDay, sTime := "", ""
 	if dur.Days != 0 {
@@ -760,8 +771,12 @@ func (dur FEELDuration) String() string {
 	if dur.Minutes != 0 {
 		sTime += fmt.Sprintf("%dM", dur.Minutes)
 	}
-	if dur.Seconds != 0 || dur.SecondsFrac != "" {
-		sTime += fmt.Sprintf("%d%sS", dur.Seconds, dur.SecondsFrac)
+	frac := dur.SecondsFrac
+	if secondsFracIsZero(frac) {
+		frac = ""
+	}
+	if dur.Seconds != 0 || frac != "" {
+		sTime += fmt.Sprintf("%d%sS", dur.Seconds, frac)
 	}
 	if sTime != "" {
 		return neg + "P" + sDay + "T" + sTime

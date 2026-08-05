@@ -140,32 +140,71 @@ func (rv RangeValue) Contains(p any) (bool, error) {
 	return r == 0, nil
 }
 
-func (rv RangeValue) overlapsBefore(other RangeValue) (bool, error) {
-	pos, err := other.Position(rv.End)
+// overlapsRange reports whether rv and other share at least one point,
+// including the boundary case where two closed endpoints touch.
+func (rv RangeValue) overlapsRange(other RangeValue) (bool, error) {
+	before, err := rv.BeforeRange(other)
 	if err != nil {
 		return false, err
 	}
-	if pos != 0 {
+	if before {
 		return false, nil
-	} else if rv.EndOpen && CompareValues(rv.End, other.Start) == 0 {
-		return false, nil
-	} else {
-		return true, nil
 	}
+	after, err := rv.AfterRange(other)
+	if err != nil {
+		return false, err
+	}
+	return !after, nil
 }
 
-func (rv RangeValue) overlapsAfter(other RangeValue) (bool, error) {
-	pos, err := other.Position(rv.Start)
+// toRangeValue treats a bare point value as a degenerate closed range
+// [p..p], so point/range comparisons can share the same logic as
+// range/range comparisons.
+func toRangeValue(v any) RangeValue {
+	if rv, ok := v.(*RangeValue); ok {
+		return *rv
+	}
+	return RangeValue{Start: v, End: v}
+}
+
+// compareStartEff compares the effective start positions of a and b: equal
+// raw values are broken by openness, since an open start begins
+// infinitesimally later than a closed start at the same value.
+func compareStartEff(a, b RangeValue) (int, error) {
+	cmp, err := compareInterfaces(a.Start, b.Start)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	if pos != 0 {
-		return false, nil
-	} else if rv.EndOpen && CompareValues(rv.Start, other.End) == 0 {
-		return false, nil
-	} else {
-		return true, nil
+	if cmp != 0 {
+		return cmp, nil
 	}
+	if a.StartOpen == b.StartOpen {
+		return 0, nil
+	}
+	if a.StartOpen {
+		return 1, nil
+	}
+	return -1, nil
+}
+
+// compareEndEff compares the effective end positions of a and b: equal raw
+// values are broken by openness, since an open end finishes infinitesimally
+// earlier than a closed end at the same value.
+func compareEndEff(a, b RangeValue) (int, error) {
+	cmp, err := compareInterfaces(a.End, b.End)
+	if err != nil {
+		return 0, err
+	}
+	if cmp != 0 {
+		return cmp, nil
+	}
+	if a.EndOpen == b.EndOpen {
+		return 0, nil
+	}
+	if a.EndOpen {
+		return -1, nil
+	}
+	return 1, nil
 }
 
 // rangeNodeElementType returns the full parameterized range type (e.g. "range<date>")
@@ -374,44 +413,47 @@ func installRangeFunctions(prelude *Prelude) {
 	}).Required("a", "b"))
 
 	prelude.Bind("overlaps", wrapTyped(func(a *RangeValue, b *RangeValue) (bool, error) {
-		obefore, err := a.overlapsBefore(*b)
-		if err != nil {
-			return false, err
-		} else if obefore {
-			return true, nil
-		}
-		oafter, err := a.overlapsAfter(*b)
-		if err != nil {
-			return false, err
-		} else if oafter {
-			return true, nil
-		}
-		return false, nil
+		return a.overlapsRange(*b)
 	}).Required("a", "b"))
 
 	prelude.Bind("overlaps before", wrapTyped(func(a *RangeValue, b *RangeValue) (bool, error) {
-		return a.overlapsBefore(*b)
+		ov, err := a.overlapsRange(*b)
+		if err != nil || !ov {
+			return false, err
+		}
+		cmp, err := compareStartEff(*a, *b)
+		if err != nil {
+			return false, err
+		}
+		return cmp < 0, nil
 	}).Required("a", "b"))
 
 	prelude.Bind("overlaps after", wrapTyped(func(a *RangeValue, b *RangeValue) (bool, error) {
-		return a.overlapsAfter(*b)
+		ov, err := a.overlapsRange(*b)
+		if err != nil || !ov {
+			return false, err
+		}
+		cmp, err := compareStartEff(*a, *b)
+		if err != nil {
+			return false, err
+		}
+		return cmp > 0, nil
 	}).Required("a", "b"))
 
 	prelude.Bind("finishes", wrapTyped(func(a any, b *RangeValue) (bool, error) {
-		switch va := a.(type) {
-		case *RangeValue:
-			r, err := compareInterfaces(va.End, b.End)
-			if err != nil {
-				return false, err
-			}
-			return r == 0 && !b.EndOpen, nil
-		default:
-			r, err := compareInterfaces(a, b.End)
-			if err != nil {
-				return false, err
-			}
-			return r == 0 && !b.EndOpen, nil
+		ar := toRangeValue(a)
+		cmpEnd, err := compareEndEff(ar, *b)
+		if err != nil {
+			return false, err
 		}
+		if cmpEnd != 0 {
+			return false, nil
+		}
+		cmpStart, err := compareStartEff(ar, *b)
+		if err != nil {
+			return false, err
+		}
+		return cmpStart >= 0, nil
 	}).Required("a", "b"))
 
 	prelude.Bind("starts", wrapTyped(func(a any, b *RangeValue) (bool, error) {
@@ -441,21 +483,19 @@ func installRangeFunctions(prelude *Prelude) {
 	}).Required("a", "b"))
 
 	prelude.Bind("finished by", wrapTyped(func(a *RangeValue, b any) (bool, error) {
-		switch vb := b.(type) {
-		case *RangeValue:
-			r, err := compareInterfaces(vb.End, a.End)
-			if err != nil {
-				return false, err
-			}
-
-			return r == 0 && !a.EndOpen, nil
-		default:
-			r, err := compareInterfaces(b, a.End)
-			if err != nil {
-				return false, err
-			}
-			return r == 0 && !a.EndOpen, nil
+		br := toRangeValue(b)
+		cmpEnd, err := compareEndEff(br, *a)
+		if err != nil {
+			return false, err
 		}
+		if cmpEnd != 0 {
+			return false, nil
+		}
+		cmpStart, err := compareStartEff(br, *a)
+		if err != nil {
+			return false, err
+		}
+		return cmpStart >= 0, nil
 	}).Required("a", "b"))
 
 	prelude.Bind("started by", wrapTyped(func(a *RangeValue, b any) (bool, error) {
@@ -525,39 +565,18 @@ func installRangeFunctions(prelude *Prelude) {
 		return parseRangeString(strVal)
 	}).Optional("from").Vararg("__extra"))
 
-	prelude.Bind("coincides", NewNativeFunc(func(kwargs map[string]any) (any, error) {
-		type coincidesArgs struct {
-			A *RangeValue `json:"a"`
-			B *RangeValue `json:"b"`
+	prelude.Bind("coincides", wrapTyped(func(a any, b any) (bool, error) {
+		ar := toRangeValue(a)
+		br := toRangeValue(b)
+		cmpStart, err := compareStartEff(ar, br)
+		if err != nil {
+			return false, err
 		}
-		args := coincidesArgs{}
-		if err := decodeKWArgs(kwargs, &args); err != nil {
-			// a, b is not rangevalue
-			r, err := compareInterfaces(kwargs["a"], kwargs["b"])
-			if err != nil {
-				return nil, err
-			}
-			return r == 0, nil
-		} else {
-			a := args.A
-			b := args.B
-			if a.StartOpen != b.StartOpen {
-				return false, nil
-			}
-			if a.EndOpen != b.EndOpen {
-				return false, nil
-			}
-			cmpStart, err := compareInterfaces(a.Start, b.Start)
-			if err != nil {
-				return nil, err
-			}
-			cmpEnd, err := compareInterfaces(a.End, b.End)
-			if err != nil {
-				return nil, err
-			}
-			return cmpStart == 0 && cmpEnd == 0, nil
+		cmpEnd, err := compareEndEff(ar, br)
+		if err != nil {
+			return false, err
 		}
-
+		return cmpStart == 0 && cmpEnd == 0, nil
 	}).Required("a", "b"))
 
 }
