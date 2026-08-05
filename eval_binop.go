@@ -218,18 +218,6 @@ func compareMaps(a, b map[string]any) (int, error) {
 	return 0, nil
 }
 
-func (binop Binop) compareValues(intp *Interpreter) (int, error) {
-	leftVal, err := binop.Left.Eval(intp)
-	if err != nil {
-		return 0, err
-	}
-	rightVal, err := binop.Right.Eval(intp)
-	if err != nil {
-		return 0, err
-	}
-	return compareInterfaces(leftVal, rightVal)
-}
-
 // orderingCompare evaluates operands for ordering comparisons (<, <=, >, >=).
 // Per the FEEL spec, if either operand is null the result is null, not an error.
 func (binop Binop) orderingCompare(intp *Interpreter) (int, bool, error) {
@@ -566,7 +554,27 @@ func (binop Binop) equalOp(intp *Interpreter) (any, error) {
 }
 
 func (binop Binop) notEqalOp(intp *Interpreter) (any, error) {
-	r, err := binop.compareValues(intp)
+	leftVal, err := binop.Left.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	rightVal, err := binop.Right.Eval(intp)
+	if err != nil {
+		return nil, err
+	}
+	_, leftNull := leftVal.(*NullValue)
+	_, rightNull := rightVal.(*NullValue)
+	// null compared against a known non-null value is a definite
+	// inequality, matching equalOp's handling of the same case.
+	if leftNull != rightNull {
+		return true, nil
+	}
+	if isRangeOrUnaryTest(leftVal) || isRangeOrUnaryTest(rightVal) {
+		if reflect.TypeOf(leftVal) != reflect.TypeOf(rightVal) {
+			return true, nil
+		}
+	}
+	r, err := compareInterfaces(leftVal, rightVal)
 	if err != nil {
 		var evalError *EvalError
 		if errors.As(err, &evalError) && evalError.Code == -3106 {
@@ -574,9 +582,8 @@ func (binop Binop) notEqalOp(intp *Interpreter) (any, error) {
 			return false, nil
 		}
 		return false, err
-	} else {
-		return r != 0, nil
 	}
+	return r != 0, nil
 }
 
 func (binop Binop) modOp(intp *Interpreter) (any, error) {

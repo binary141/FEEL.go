@@ -245,3 +245,42 @@ func nativeBind(intp *Interpreter, varname string, value any) (any, error) {
 	intp.Bind(varname, value)
 	return nil, nil
 }
+
+// callableArity returns the number of positional parameters v (a *FunDef or
+// *NativeFun) accepts, for builtins (sort, list replace, ...) that take a
+// function value as ordinary data and need to validate its arity before
+// calling it positionally.
+func callableArity(v any) (int, bool) {
+	switch fn := v.(type) {
+	case *FunDef:
+		return len(fn.Args), true
+	case *NativeFun:
+		return len(fn.requiredArgNames) + len(fn.optionalArgNames), true
+	default:
+		return 0, false
+	}
+}
+
+// callPositional invokes v (a *FunDef or *NativeFun) with positional
+// arguments, for builtins that receive a function value as data rather than
+// calling it through normal FunCall syntax.
+func callPositional(intp *Interpreter, v any, args []any) (any, bool, error) {
+	switch fn := v.(type) {
+	case *FunDef:
+		r, err := fn.EvalCall(intp, args)
+		return r, true, err
+	case *NativeFun:
+		argMap := make(map[string]any, len(args))
+		for i, a := range args {
+			name, ok := fn.ArgNameAt(i)
+			if !ok {
+				break
+			}
+			argMap[name] = a
+		}
+		r, err := fn.Call(intp, argMap)
+		return r, true, err
+	default:
+		return nil, false, nil
+	}
+}

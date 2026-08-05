@@ -1205,8 +1205,7 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err != nil {
 			return nil, err
 		}
-		predicates, ok := vpred.(*FunDef)
-		if !ok {
+		if _, ok := callableArity(vpred); !ok {
 			//return nil, NewEvalError(-4080, "the second argument is not function")
 			return nil, NewErrTypeMismatch("function")
 		}
@@ -1214,7 +1213,7 @@ func installBuiltinFunctions(prelude *Prelude) {
 		newList := append([]any{}, list...)
 		var sortErr error
 		sort.Slice(newList, func(i, j int) bool {
-			r, err := predicates.EvalCall(intp, []any{newList[i], newList[j]})
+			r, _, err := callPositional(intp, vpred, []any{newList[i], newList[j]})
 			if err != nil {
 				//panic(err)
 				sortErr = err
@@ -1484,14 +1483,14 @@ func installBuiltinFunctions(prelude *Prelude) {
 				return Null, nil
 			}
 			// A function in the position slot means positional-call match mode
-			if fn, isFn := posVal.(*FunDef); isFn {
-				if len(fn.Args) != 2 {
+			if arity, isFn := callableArity(posVal); isFn {
+				if arity != 2 {
 					return Null, nil
 				}
 				newList := make([]any, len(list))
 				copy(newList, list)
 				for i, item := range list {
-					result, err := fn.EvalCall(intp, []any{item, newItem})
+					result, _, err := callPositional(intp, posVal, []any{item, newItem})
 					if err != nil {
 						return Null, nil
 					}
@@ -1534,17 +1533,17 @@ func installBuiltinFunctions(prelude *Prelude) {
 		if err != nil {
 			return Null, nil
 		}
-		matchFn, ok := matchVal.(*FunDef)
+		arity, ok := callableArity(matchVal)
 		if !ok {
 			return Null, nil
 		}
-		if len(matchFn.Args) != 2 {
+		if arity != 2 {
 			return Null, nil
 		}
 		newList := make([]any, len(list))
 		copy(newList, list)
 		for i, item := range list {
-			result, err := matchFn.EvalCall(intp, []any{item, newItem})
+			result, _, err := callPositional(intp, matchVal, []any{item, newItem})
 			if err != nil {
 				return Null, nil
 			}

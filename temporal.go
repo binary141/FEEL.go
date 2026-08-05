@@ -1170,20 +1170,20 @@ func installDatetimeFunctions(prelude *Prelude) {
 	}).Vararg("__extra"))
 
 	prelude.Bind("day of week", wrapTyped(func(v HasDate) (any, error) {
-		return v.Date().Weekday(), nil
+		return v.Date().Weekday().String(), nil
 	}).Required("date"))
 
 	prelude.Bind("day of year", wrapTyped(func(v HasDate) (any, error) {
-		return v.Date().YearDay(), nil
+		return NewNumberFromInt64(int64(v.Date().YearDay())), nil
 	}).Required("date"))
 
 	prelude.Bind("week of year", wrapTyped(func(v HasDate) (any, error) {
 		_, week := v.Date().ISOWeek()
-		return week, nil
+		return NewNumberFromInt64(int64(week)), nil
 	}).Required("date"))
 
 	prelude.Bind("month of year", wrapTyped(func(v HasDate) (any, error) {
-		return v.Date().Month(), nil
+		return v.Date().Month().String(), nil
 	}).Required("date"))
 
 	// refs https://docs.camunda.io/docs/components/modeler/feel/builtin-functions/feel-built-in-functions-temporal/#last-day-of-monthdate
